@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+
+# Credenciais e certificados
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+credentials/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs
+.vscode/
+.idea/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Dados locais
+data/raw/
+data/processed/
+data/curated/
+data/cache/
+
+# Arquivos de dados
+*.zip
+*.parquet
+*.csv
+*.xlsx
+
+# Logs e temporários
+*.log
+logs/
+*.tmp
+*.bak
+
+# Testes e cache
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Arquivos locais de banco
+*.sqlite
+*.sqlite3
+*.db
