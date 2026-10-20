@@ -9,7 +9,7 @@ load_dotenv()
 
 
 def get_engine():
-    """Cria e retorna uma conexão configurada com o PostgreSQL."""
+    """Cria e retorna uma Engine configurada para o PostgreSQL."""
 
     database_url = URL.create(
         drivername="postgresql+psycopg",
@@ -22,7 +22,7 @@ def get_engine():
 
     engine = create_engine(
         database_url,
-        pool_pre_ping=True
+        pool_pre_ping=True,
     )
 
     return engine
