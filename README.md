@@ -216,7 +216,7 @@ Pipeline completa para um período existente:
 python main.py 2026-07 --source minio
 Atenção: esse comando executa transformações e modifica Staging e Gold. O modo --skip-gold também modifica a Staging:
 python main.py 2026-07 --source minio --skip-gold
-Para os comandos operacionais completos, testes, consultas SQL, diagnóstico e procedimentos de inicialização, consulte [COMANDOS_UTEIS.md](docs/COMANDOS_UTEIS.md).
+Para os comandos operacionais completos, testes, consultas SQL, diagnóstico e procedimentos de inicialização, consulte [Comandos.md](docs/Comandos.md).
 
 8. Limitações e cuidados
 - A fonte Consumidor.gov.br pode ficar indisponível temporariamente; nem todos os meses foram recuperados.
