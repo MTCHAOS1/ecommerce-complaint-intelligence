@@ -6,6 +6,8 @@ from sqlalchemy import text
 
 from src.database.connection import get_engine
 
+from src.database.gold_lock import gold_execution_lock
+
 
 INSERT_RUNNING = text("""
     INSERT INTO metadata.gold_load_control
@@ -99,3 +101,70 @@ def fail_gold_execution(execution_id: int, error: BaseException) -> None:
                 raise RuntimeError(f"Execução {execution_id} não está RUNNING")
     finally:
         engine.dispose()
+
+        # ============================================================
+# RECUPERAÇÃO DE EXECUÇÕES INTERROMPIDAS
+# ============================================================
+
+RECOVER_INTERRUPTED = text("""
+    UPDATE metadata.gold_load_control
+       SET status = 'FAILED',
+           finalizado_em = CURRENT_TIMESTAMP,
+           mensagem_erro = (
+               'Execução marcada como FAILED por recuperação '
+               'administrativa após exceder o tempo limite.'
+           )
+     WHERE status = 'RUNNING'
+       AND iniciado_em < (
+           CURRENT_TIMESTAMP - (
+               CAST(:timeout_minutes AS INTEGER) * INTERVAL '1 minute'
+           )
+       )
+    RETURNING execution_id
+""")
+
+
+
+def recover_interrupted_executions(
+    timeout_minutes: int = 60,
+) -> list[int]:
+    """
+    Recupera execuções RUNNING que ultrapassaram
+    o tempo limite.
+
+    A recuperação só ocorre quando nenhuma outra
+    operação protegida pelo Advisory Lock está ativa.
+
+    Retorna os IDs das execuções recuperadas.
+    """
+
+    if (
+        isinstance(timeout_minutes, bool)
+        or not isinstance(timeout_minutes, int)
+        or timeout_minutes <= 0
+    ):
+        raise ValueError(
+            "timeout_minutes deve ser um inteiro positivo."
+        )
+
+    # Usa o mesmo bloqueio exclusivo da pipeline.
+    with gold_execution_lock():
+
+        engine = get_engine()
+
+        try:
+            with engine.begin() as connection:
+                result = connection.execute(
+                    RECOVER_INTERRUPTED,
+                    {
+                        "timeout_minutes": timeout_minutes,
+                    },
+                )
+
+                recovered_ids = result.scalars().all()
+
+            return recovered_ids
+
+        finally:
+            engine.dispose()
+
