@@ -276,35 +276,10 @@ def transform(df):
 # ============================================================
 
 def validate_period(df, period):
-    """
-    Verifica se as datas válidas pertencem ao
-    período informado.
-    """
-
-    expected = pd.Period(
-        period,
-        freq="M",
-    )
-
-    valid_dates = (
-        df["data_finalizacao"]
-        .dropna()
-        .dt.to_period("M")
-    )
-
-    invalid = valid_dates[
-        valid_dates != expected
-    ]
-
-    if not invalid.empty:
-        raise ValueError(
-            f"Foram encontrados {len(invalid):,} "
-            f"registros fora do período {period}."
-        )
-
-    print(
-        f"[OK] Período validado: {period}"
-    )
+    """Valida todas as datas antes de publicar a Silver."""
+    from src.quality.period_validation import validate_period_dates
+    validate_period_dates(df, period)
+    print(f"[OK] Período validado: {period}")
 
 
 # ============================================================

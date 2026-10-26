@@ -1,3 +1,5 @@
+CREATE SCHEMA IF NOT EXISTS warehouse;
+
 DROP TABLE IF EXISTS warehouse.fato_reclamacao;
 
 DROP TABLE IF EXISTS warehouse.dim_classificacao;

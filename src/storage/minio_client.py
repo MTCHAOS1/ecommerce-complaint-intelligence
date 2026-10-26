@@ -26,7 +26,7 @@ def get_minio_client():
 
     return boto3.client(
         "s3",
-        endpoint_url="http://127.0.0.1:9000",
+        endpoint_url=os.getenv("MINIO_ENDPOINT", "http://127.0.0.1:9000"),
         aws_access_key_id=access_key,
         aws_secret_access_key=secret_key,
         region_name="us-east-1",

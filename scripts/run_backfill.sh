@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-PROJECT_DIR="/home/mtchaos/Projetos_WSL/ecommerce-complaint-intelligence"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="$PROJECT_DIR/.venv/bin/python"
 
 LOG_DIR="$PROJECT_DIR/logs"
