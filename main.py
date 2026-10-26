@@ -1,10 +1,13 @@
 
 import argparse
+import os
 import re
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 from src.database.gold_audit import (
     count_gold_records,
@@ -17,9 +20,7 @@ from src.database.gold_lock import gold_execution_lock
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-POSTGRES_HOST = "localhost"
-POSTGRES_USER = "complaints_user"
-POSTGRES_DATABASE = "ecommerce_complaints"
+load_dotenv(PROJECT_ROOT / ".env")
 
 GOLD_SQL_FILE = (
     PROJECT_ROOT / "sql" / "warehouse" / "load_star_schema.sql"
@@ -131,11 +132,13 @@ def load_gold(period):
     command = [
         "psql",
         "-h",
-        POSTGRES_HOST,
+        os.getenv("DB_HOST", "localhost"),
+        "-p",
+        os.getenv("DB_PORT", "5432"),
         "-U",
-        POSTGRES_USER,
+        os.environ["DB_USER"],
         "-d",
-        POSTGRES_DATABASE,
+        os.environ["DB_NAME"],
         "-v",
         "ON_ERROR_STOP=1",
         "-f",
@@ -143,10 +146,25 @@ def load_gold(period):
     ]
 
     try:
-        elapsed = run_command(
+        print("\nPOSTGRESQL STAGING -> GOLD", flush=True)
+        started = time.perf_counter()
+        result = subprocess.run(
             command,
-            "POSTGRESQL STAGING -> GOLD",
+            cwd=PROJECT_ROOT,
+            text=True,
+            capture_output=True,
+            env={**os.environ, "PGPASSWORD": os.environ["DB_PASSWORD"]},
         )
+        if result.stdout:
+            print(result.stdout, end="")
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr)
+        if result.returncode:
+            raise RuntimeError(
+                f"psql falhou (código {result.returncode}): "
+                f"{result.stderr.strip() or result.stdout.strip() or 'sem detalhes'}"
+            )
+        elapsed = time.perf_counter() - started
 
         gold_count = count_gold_records(period)
 

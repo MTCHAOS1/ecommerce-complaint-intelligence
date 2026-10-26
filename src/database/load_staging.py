@@ -185,49 +185,12 @@ def load_silver(silver_file, period):
 # ============================================================
 
 def validate_period(df, period):
-    """
-    Valida as datas antes de iniciar a transação.
-    """
-
-    expected_period = pd.Period(
-        period,
-        freq="M",
-    )
-
-    dates = pd.to_datetime(
-        df["data_finalizacao"],
-        errors="coerce",
-    )
-
-    null_dates = dates.isna().sum()
-
-    if null_dates > 0:
-        raise ValueError(
-            f"Existem {null_dates:,} datas de "
-            "finalização inválidas/nulas."
-        )
-
-    periods = dates.dt.to_period("M")
-
-    invalid_rows = periods != expected_period
-    invalid_count = invalid_rows.sum()
-
-    if invalid_count > 0:
-        invalid_periods = (
-            periods[invalid_rows]
-            .value_counts()
-            .sort_index()
-        )
-
-        raise ValueError(
-            f"Foram encontrados {invalid_count:,} "
-            f"registros fora de {period}.\n"
-            f"Períodos encontrados:\n{invalid_periods}"
-        )
-
-    print(
-        f"[OK] Período da Silver validado: {period}"
-    )
+    """Aplica as mesmas regras de data da Silver e valida chaves dimensionais."""
+    from src.quality.period_validation import validate_period_dates, validate_dimension_keys
+    validate_period_dates(df, period)
+    validate_dimension_keys(df)
+    print(f"[OK] Período da Silver validado: {period}")
+    print("[OK] Empresa, UF e cidade obrigatórias validadas.")
 
 
 # ============================================================

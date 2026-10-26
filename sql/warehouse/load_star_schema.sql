@@ -24,6 +24,25 @@ BEGIN
     END IF;
 END $$;
 
+-- Rejeitar chaves dimensionais vazias antes de alterar qualquer dimensão.
+-- A transação preserva o warehouse existente em caso de falha.
+DO $$
+DECLARE
+    v_invalidos BIGINT;
+BEGIN
+    SELECT COUNT(*) INTO v_invalidos
+    FROM staging.complaints
+    WHERE NULLIF(BTRIM(nome_fantasia), '') IS NULL
+       OR NULLIF(BTRIM(uf), '') IS NULL
+       OR NULLIF(BTRIM(cidade), '') IS NULL;
+
+    IF v_invalidos > 0 THEN
+        RAISE EXCEPTION
+            'Staging invalida: % registros com empresa, UF ou cidade ausente/vazia.',
+            v_invalidos;
+    END IF;
+END $$;
+
 -- ============================================================
 -- 1. DIMENSAO EMPRESA
 -- ============================================================
