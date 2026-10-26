@@ -4,12 +4,11 @@ import sys
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-from sqlalchemy import text
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.database.connection import get_engine
+from dashboard.services.analytics import consultar, periodos_disponiveis
 
 
 st.set_page_config(
@@ -24,41 +23,6 @@ MESES = {
     7: "Julho", 8: "Agosto", 9: "Setembro",
     10: "Outubro", 11: "Novembro", 12: "Dezembro",
 }
-
-
-@st.cache_data(ttl=600)
-def consultar(sql, parametros=None):
-    engine = get_engine()
-    try:
-        with engine.connect() as conn:
-            banco = conn.execute(
-                text("SELECT current_database()")
-            ).scalar_one()
-
-            if banco != "ecommerce_complaints":
-                raise RuntimeError(
-                    f"Banco inesperado: {banco}"
-                )
-
-            return pd.read_sql_query(
-                text(sql),
-                conn,
-                params=parametros or {},
-            )
-    finally:
-        engine.dispose()
-
-
-@st.cache_data(ttl=600)
-def periodos_disponiveis():
-    return consultar("""
-        SELECT t.ano, t.mes, COUNT(*) AS total
-        FROM warehouse.fato_reclamacao f
-        JOIN warehouse.dim_tempo t
-            ON t.data_id = f.data_id
-        GROUP BY t.ano, t.mes
-        ORDER BY t.ano, t.mes
-    """)
 
 
 def filtro_sql():
