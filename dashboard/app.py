@@ -8,6 +8,9 @@ import streamlit as st
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from dashboard.components.navigation import render_navigation
+from dashboard.views import companies, geography, problems, service
+
 from dashboard.services.analytics import consultar, periodos_disponiveis
 
 
@@ -16,6 +19,21 @@ st.set_page_config(
     page_icon="📊",
     layout="wide",
 )
+
+pagina_atual = render_navigation()
+
+if pagina_atual != "overview":
+    paginas = {
+        "companies": companies,
+        "geography": geography,
+        "problems": problems,
+        "service": service,
+    }
+
+    paginas[pagina_atual].render()
+    st.stop()
+
+
 
 MESES = {
     1: "Janeiro", 2: "Fevereiro", 3: "Março",
