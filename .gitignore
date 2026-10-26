@@ -32,12 +32,16 @@ data/raw/
 data/processed/
 data/curated/
 data/cache/
+data/diagnostics/
+data/arquivos_finalizadas.json
 
 # Arquivos de dados
 *.zip
 *.parquet
 *.csv
 *.xlsx
+*.7z
+*.part
 
 # Logs e temporários
 *.log

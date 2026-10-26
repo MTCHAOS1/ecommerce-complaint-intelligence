@@ -342,6 +342,34 @@ python -m streamlit run dashboard/app.py
 
 Acesse `http://localhost:8501` pelo navegador. No WSL, o aviso `gio: ... Operation not supported` ao abrir automaticamente o navegador pode ser ignorado. **O dashboard requer o PostgreSQL ativo e `.env` configurado.** O filtro de meses considera os períodos já carregados; meses ainda não ingeridos não devem ser tratados como zero. O tempo médio é exibido na unidade do campo original, ainda sem verificação da unidade.
 
+### Download direto pelo catálogo BaseUrl.json
+
+O script `scripts/download_direct.py` lê o catálogo local `data/BaseUrl.json` e seleciona publicações cujo campo `texto` começa com `Arquivo em formato CSV com dados de todas as reclamações finalizadas`. O catálogo incluído contém 681 publicações, das quais 81 atendem ao filtro.
+
+Confira os nomes e URLs antes de baixar:
+
+```bash
+.venv/bin/python scripts/download_direct.py --listar
+```
+
+Baixe todos os arquivos selecionados:
+
+```bash
+.venv/bin/python scripts/download_direct.py
+```
+
+Os downloads são sequenciais, sem pausa entre arquivos, e usam o `codigo` da publicação para montar `https://consumidor.gov.br/pages/publicacao/externo/{codigo}/download`. O nome original de `nomeArquivo` é preservado. Por padrão, os arquivos ficam em `data/diagnostics`, independentemente do diretório de execução. Para selecionar outro catálogo ou destino:
+
+```bash
+.venv/bin/python scripts/download_direct.py --json data/BaseUrl.json --destino data/raw
+```
+
+O script imprime logs com data, hora e nível (`INFO`, `OK`, `ERRO`), progresso por arquivo, bytes recebidos durante a transferência, resposta HTTP, validação do ZIP, duração e resumo final. A transferência usa um arquivo `.part`; somente após a validação ele recebe o nome definitivo, substituindo um arquivo existente com o mesmo nome. Em caso de falha, o temporário é removido e os próximos downloads continuam. A execução termina com código 1 se houver falhas, ou 0 se todos forem concluídos.
+
+Os ZIPs são validados, mas não descompactados. Este script somente baixa arquivos: não executa cargas no MinIO, Silver, Staging ou Gold. Para atualizar a seleção, substitua o catálogo local por uma resposta JSON mais recente da fonte pública. O utilitário `scripts/inspect_publications.py` consulta o catálogo remoto e exibe as publicações de maio e junho de 2026. Como alternativa pelo navegador, `scripts/download_baseurl.js` permite selecionar o JSON local e solicitar os downloads no console do Consumidor.gov.br.
+
+O `.gitignore` mantém credenciais, downloads, dados processados, logs e arquivos temporários fora do versionamento. O catálogo público `data/BaseUrl.json` é versionado; a lista derivada `data/arquivos_finalizadas.json` e a pasta `data/diagnostics/` permanecem locais.
+
 ## 8. Limitações e cuidados
 
 - A fonte Consumidor.gov.br pode ficar indisponível temporariamente; nem todos os meses foram recuperados.
