@@ -1,0 +1,3 @@
+-c constraints-py314-linux.txt
+# Complemento à base para testes.
+pytest==9.1.1

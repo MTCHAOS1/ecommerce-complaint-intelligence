@@ -168,3 +168,20 @@ def recover_interrupted_executions(
         finally:
             engine.dispose()
 
+
+
+def main():
+    """CLI administrativa; subcomando explícito para evitar alterações acidentais."""
+    import argparse
+    parser = argparse.ArgumentParser(description="Administração da auditoria Gold.")
+    commands = parser.add_subparsers(dest="command", required=True)
+    recover = commands.add_parser("recover", help="Marca execuções antigas RUNNING como FAILED.")
+    recover.add_argument("--timeout-minutes", type=int, default=60)
+    args = parser.parse_args()
+    if args.timeout_minutes <= 0:
+        parser.error("--timeout-minutes deve ser um inteiro positivo.")
+    print("Execuções recuperadas:", recover_interrupted_executions(args.timeout_minutes))
+
+
+if __name__ == "__main__":
+    main()

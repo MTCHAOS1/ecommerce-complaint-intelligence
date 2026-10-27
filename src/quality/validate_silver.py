@@ -204,7 +204,7 @@ def validate_evaluated_score(df):
     )
 
 
-def validate_silver(df):
+def validate_silver(df, period=None):
     """Executa todas as regras de Data Quality."""
 
     print("=" * 60)
@@ -213,6 +213,10 @@ def validate_silver(df):
 
     validate_empty_dataset(df)
     validate_columns(df)
+    from src.quality.period_validation import validate_dimension_keys, validate_period_dates
+    validate_dimension_keys(df)
+    if period is not None:
+        validate_period_dates(df, period)
     validate_uf(df)
     validate_boolean_columns(df)
     validate_dates(df)

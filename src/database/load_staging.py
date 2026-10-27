@@ -3,6 +3,8 @@ import argparse
 import re
 from pathlib import Path
 
+from src.database.gold_lock import exclusive_operation
+
 import pandas as pd
 from sqlalchemy import text
 
@@ -356,12 +358,12 @@ def validate_load(df, connection, period):
 # PIPELINE
 # ============================================================
 
-def main():
-    args = get_arguments()
+@exclusive_operation
+def run(period, source="local"):
 
     print("\n" + "=" * 60)
-    print(f"SILVER -> STAGING | {args.period}")
-    print(f"Origem Silver: {args.source.upper()}")
+    print(f"SILVER -> STAGING | {period}")
+    print(f"Origem Silver: {source.upper()}")
     print("Modo: TRANSACIONAL")
     print("=" * 60)
 
@@ -370,19 +372,22 @@ def main():
     # --------------------------------------------------------
 
     silver_file = get_silver_file(
-        args.period,
-        args.source,
+        period,
+        source,
     )
 
     df = load_silver(
         silver_file,
-        args.period,
+        period,
     )
 
     validate_period(
         df,
-        args.period,
+        period,
     )
+
+    from src.quality.validate_silver import validate_silver
+    validate_silver(df, period)
 
     # --------------------------------------------------------
     # 2. Abrir uma única transação PostgreSQL.
@@ -405,7 +410,7 @@ def main():
             validate_load(
                 df,
                 connection,
-                args.period,
+                period,
             )
 
             # Ao sair normalmente do bloco,
@@ -431,6 +436,11 @@ def main():
     print("\n" + "=" * 60)
     print("STAGING FINALIZADA COM SUCESSO")
     print("=" * 60)
+
+
+def main():
+    args = get_arguments()
+    run(args.period, args.source)
 
 
 if __name__ == "__main__":

@@ -1,211 +1,21 @@
 
 import argparse
-import os
 import re
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-from src.database.gold_audit import (
-    count_gold_records,
-    fail_gold_execution,
-    finish_gold_execution,
-    start_gold_execution,
-)
 from src.database.gold_lock import gold_execution_lock
+from src.database.load_gold import load_gold
+from src.database.load_staging import run as load_staging
+from src.ingestion.download_complaints import run as ingest_local
+from src.transformation.transform_complaints import run as transform
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-
 load_dotenv(PROJECT_ROOT / ".env")
-
-GOLD_SQL_FILE = (
-    PROJECT_ROOT / "sql" / "warehouse" / "load_star_schema.sql"
-)
-
-
-def run_command(command, step_name):
-    """Executa um comando e registra seu tempo de execução."""
-
-    print(
-        f"\n{'=' * 70}\n"
-        f"{step_name}\n"
-        f"{'=' * 70}",
-        flush=True,
-    )
-
-    start = time.perf_counter()
-
-    subprocess.run(
-        command,
-        cwd=PROJECT_ROOT,
-        check=True,
-    )
-
-    elapsed = time.perf_counter() - start
-
-    print(
-        f"\n[OK] {step_name} concluída "
-        f"em {elapsed:.2f} segundos."
-    )
-
-    return elapsed
-
-
-def ingest_local(period):
-    """Realiza a ingestão local para a camada Bronze."""
-
-    return run_command(
-        [
-            sys.executable,
-            "-m",
-            "src.ingestion.download_complaints",
-            period,
-        ],
-        f"INGESTÃO LOCAL -> BRONZE | {period}",
-    )
-
-
-def transform(period, source):
-    """Transforma dados Bronze em Silver."""
-
-    command = [
-        sys.executable,
-        "-m",
-        "src.transformation.transform_complaints",
-        period,
-        "--source",
-        source,
-    ]
-
-    if source == "minio":
-        command.append("--upload-silver")
-
-    return run_command(
-        command,
-        f"BRONZE -> SILVER | {period} | {source.upper()}",
-    )
-
-
-def load_staging(period, source):
-    """Carrega os dados Silver na Staging PostgreSQL."""
-
-    return run_command(
-        [
-            sys.executable,
-            "-m",
-            "src.database.load_staging",
-            period,
-            "--source",
-            source,
-        ],
-        (
-            f"SILVER -> POSTGRESQL STAGING "
-            f"| {period} | {source.upper()}"
-        ),
-    )
-
-
-def load_gold(period):
-    """
-    Executa a carga Gold e registra sua auditoria.
-
-    A auditoria utiliza transações independentes
-    da transação executada pelo script SQL.
-    """
-
-    if not GOLD_SQL_FILE.is_file():
-        raise FileNotFoundError(
-            f"Script Gold não encontrado: {GOLD_SQL_FILE}"
-        )
-
-    execution_id, staging_count = start_gold_execution(period)
-
-    print(
-        f"[AUDITORIA] Execução {execution_id}: RUNNING "
-        f"| Staging: {staging_count:,}"
-    )
-
-    command = [
-        "psql",
-        "-h",
-        os.getenv("DB_HOST", "localhost"),
-        "-p",
-        os.getenv("DB_PORT", "5432"),
-        "-U",
-        os.environ["DB_USER"],
-        "-d",
-        os.environ["DB_NAME"],
-        "-v",
-        "ON_ERROR_STOP=1",
-        "-f",
-        str(GOLD_SQL_FILE),
-    ]
-
-    try:
-        print("\nPOSTGRESQL STAGING -> GOLD", flush=True)
-        started = time.perf_counter()
-        result = subprocess.run(
-            command,
-            cwd=PROJECT_ROOT,
-            text=True,
-            capture_output=True,
-            env={**os.environ, "PGPASSWORD": os.environ["DB_PASSWORD"]},
-        )
-        if result.stdout:
-            print(result.stdout, end="")
-        if result.stderr:
-            print(result.stderr, end="", file=sys.stderr)
-        if result.returncode:
-            raise RuntimeError(
-                f"psql falhou (código {result.returncode}): "
-                f"{result.stderr.strip() or result.stdout.strip() or 'sem detalhes'}"
-            )
-        elapsed = time.perf_counter() - started
-
-        gold_count = count_gold_records(period)
-
-        if gold_count != staging_count:
-            raise RuntimeError(
-                "Divergência após COMMIT: "
-                f"Staging={staging_count}, "
-                f"Gold={gold_count}"
-            )
-
-        finish_gold_execution(
-            execution_id,
-            gold_count,
-        )
-
-        print(
-            f"[AUDITORIA] Execução {execution_id}: SUCCESS "
-            f"| Gold: {gold_count:,}"
-        )
-
-        return elapsed
-
-    except Exception as error:
-        try:
-            fail_gold_execution(
-                execution_id,
-                error,
-            )
-
-            print(
-                f"[AUDITORIA] Execução {execution_id}: FAILED"
-            )
-
-        except Exception as audit_error:
-            print(
-                "[ERRO] Falha também ao registrar FAILED: "
-                f"{audit_error}",
-                file=sys.stderr,
-            )
-
-        raise
 
 
 def get_arguments():
@@ -302,6 +112,7 @@ def main():
             transform(
                 args.period,
                 args.source,
+                upload=args.source == "minio",
             )
 
             completed.append(
@@ -336,17 +147,6 @@ def main():
         print(
             "[LOCK] Bloqueio exclusivo liberado."
         )
-
-    except subprocess.CalledProcessError as error:
-        print(
-            f"\n[ERRO] Comando: {error.cmd} "
-            f"| Código: {error.returncode}",
-            file=sys.stderr,
-        )
-
-        raise SystemExit(
-            error.returncode
-        ) from error
 
     except Exception as error:
         print(

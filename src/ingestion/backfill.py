@@ -1,3 +1,5 @@
+from src.database.gold_lock import exclusive_operation
+
 
 import argparse
 import json
@@ -13,6 +15,7 @@ from botocore.exceptions import ClientError
 from sqlalchemy import text
 
 from src.database.connection import get_engine
+from src.ingestion.zip_members import select_csv_member
 from src.ingestion.download_complaints import (
     get_publications,
     get_complaint_datasets,
@@ -198,25 +201,12 @@ def validate_local_zip(path, period):
 
     try:
         with ZipFile(path) as archive:
-            members = [
-                item
-                for item in archive.infolist()
-                if not item.is_dir()
-            ]
-
-            if not members:
-                return False
-
             if archive.testzip() is not None:
                 return False
+            select_csv_member(archive, expected_name)
+            return True
 
-            return any(
-                Path(item.filename).name == expected_name
-                and item.file_size > 0
-                for item in members
-            )
-
-    except (BadZipFile, OSError):
+    except (BadZipFile, OSError, ValueError):
         return False
 
 
@@ -659,6 +649,7 @@ def process_pending_period(
 # EXECUÇÃO DO BACKFILL
 # ============================================================
 
+@exclusive_operation
 def run_backfill(
     year,
     start_month,

@@ -1,10 +1,15 @@
-import sys
+import argparse
+import re
 import time
 from pathlib import Path
+
+from src.database.gold_lock import exclusive_operation
 from zipfile import BadZipFile, ZipFile
 
 import pandas as pd
 import requests
+
+from src.ingestion.zip_members import select_csv_member
 
 
 # ============================================================
@@ -26,37 +31,13 @@ RAW_DIR = Path("data/raw")
 # ============================================================
 
 def get_period():
-    """
-    Obtém o período informado pela linha de comando.
-
-    Exemplo:
-        python src/ingestion/download_complaints.py 2026-07
-    """
-
-    if len(sys.argv) != 2:
-        print(
-            "Uso correto:\n"
-            "python src/ingestion/download_complaints.py YYYY-MM\n\n"
-            "Exemplo:\n"
-            "python src/ingestion/download_complaints.py 2026-07"
-        )
-
-        sys.exit(1)
-
-    period = sys.argv[1]
-
-    try:
-        pd.Period(period, freq="M")
-
-    except ValueError:
-        print(
-            f"Período inválido: {period}\n"
-            "Utilize o formato YYYY-MM."
-        )
-
-        sys.exit(1)
-
-    return period
+    """Valida o período da CLI; --help não abre conexão nem adquire lock."""
+    parser = argparse.ArgumentParser(description="Ingestão mensal do Consumidor.gov.br.")
+    parser.add_argument("period", help="Período YYYY-MM.")
+    args = parser.parse_args()
+    if not re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", args.period):
+        parser.error("Período inválido. Utilize YYYY-MM.")
+    return args.period
 
 
 # ============================================================
@@ -240,56 +221,14 @@ def validate_zip(file_path, period):
 
                 return False
 
-            files = zip_file.namelist()
-
-            if not files:
-
-                print("O ZIP está vazio.")
-
-                return False
-
-            csv_files = [
-                file
-                for file in files
-                if file.lower().endswith(".csv")
-            ]
-
-            if not csv_files:
-
-                print(
-                    "Nenhum arquivo CSV encontrado "
-                    "dentro do ZIP."
-                )
-
-                return False
-
-            csv_names = [
-                Path(file).name
-                for file in csv_files
-            ]
-
-            if expected_csv not in csv_names:
-
-                print(
-                    "O ZIP não contém o CSV esperado."
-                )
-
-                print(
-                    f"Esperado: {expected_csv}"
-                )
-
-                print(
-                    f"Encontrados: {csv_names}"
-                )
-
-                return False
+            select_csv_member(zip_file, expected_csv)
 
             return True
 
-    except BadZipFile:
+    except (BadZipFile, ValueError, OSError) as error:
 
         print(
-            f"Arquivo ZIP inválido: "
+            f"Arquivo ZIP inválido ({error}): "
             f"{file_path}"
         )
 
@@ -508,9 +447,9 @@ def get_existing_bronze(period):
 # EXECUÇÃO PRINCIPAL
 # ============================================================
 
-def main():
+@exclusive_operation
+def run(period):
 
-    period = get_period()
 
     print()
     print("=" * 70)
@@ -581,6 +520,10 @@ def main():
     print()
     print("[OK] Ingestão concluída.")
     print(f"Bronze: {destination}")
+
+
+def main():
+    run(get_period())
 
 
 if __name__ == "__main__":

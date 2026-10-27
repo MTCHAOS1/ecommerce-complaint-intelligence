@@ -11,9 +11,159 @@ Manual operacional para inicialização, execução, testes, consultas e diagnó
 
 ## Índice rápido
 
-[Ambiente](#1-entrar-no-projeto-e-ativar-o-python) · [Docker e MinIO](#2-docker-desktop-e-minio) · [PostgreSQL](#3-postgresql-no-wsl) · [Pipeline](#4-pipeline-principal) · [Testes por etapa](#5-testes-por-etapa) · [Backfill](#6-backfill-histórico) · [Auditoria](#10-auditoria-da-carga-gold) · [Recuperação](#11-recuperação-administrativa-de-execuções-interrompidas) · [Testes automatizados](#12-testes-automatizados) · [Dashboard](#15-dashboard-streamlit-em-desenvolvimento) · [Git](#17-git-e-github)
+[Instalação do zero](#0-instalação-em-um-checkout-novo) · [Ambiente](#1-entrar-no-projeto-e-ativar-o-python) · [Docker e MinIO](#2-docker-desktop-e-minio) · [PostgreSQL](#3-postgresql-no-wsl) · [Pipeline](#4-pipeline-principal) · [Testes por etapa](#5-testes-por-etapa) · [Backfill](#6-backfill-histórico) · [Auditoria](#10-auditoria-da-carga-gold) · [Recuperação](#11-recuperação-administrativa-de-execuções-interrompidas) · [Testes automatizados](#12-testes-automatizados) · [Dashboard](#15-dashboard-streamlit-em-desenvolvimento) · [Git](#17-git-e-github)
 
 ---
+
+## 0. Instalação em um checkout novo
+
+Roteiro validado para **CPython 3.14.4 em Linux x86_64/WSL**. Pré-requisitos:
+Python com suporte a `venv`, PostgreSQL **15+**, cliente `psql`, Docker
+Engine/Desktop e Compose v2. `.python-version` registra a versão do interpretador;
+ele não instala Python automaticamente. Instale esses programas conforme seu
+sistema antes de executar o roteiro. No WSL, ative a integração do Docker Desktop.
+
+### Python e configuração local
+
+Na raiz de um checkout novo, criar o ambiente virtual:
+
+```bash
+python3.14 -m venv .venv
+```
+
+Ativar o ambiente:
+
+```bash
+source .venv/bin/activate
+```
+
+Instalar todos os grupos com versões transitivas fixadas:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Verificar compatibilidade:
+
+```bash
+python -m pip check
+```
+
+Os grupos em `requirements/` carregam `constraints-py314-linux.txt`. Esse arquivo
+fixa a resolução completa validada na etapa 2; ele não contém hashes de artefatos
+e não foi validado para outras plataformas/versões de Python. O pip precisa de
+acesso ao índice de pacotes configurado.
+
+Criar a configuração somente se `.env` ainda não existir:
+
+```bash
+if [ ! -e .env ]; then cp .env.example .env; fi
+```
+
+Editar `.env` e substituir os exemplos pelas credenciais locais:
+
+```bash
+nano .env
+```
+
+`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER` e `DB_PASSWORD` devem corresponder ao
+PostgreSQL escolhido. `MINIO_ENDPOINT` usa a API S3 (porta 9000), e não o console
+(9001). `MINIO_ROOT_USER` e `MINIO_ROOT_PASSWORD` configuram cliente e serviço.
+Não sobrescreva um `.env` existente nem publique suas credenciais.
+
+### PostgreSQL novo
+
+O Compose atual provisiona **somente MinIO**. Para PostgreSQL instalado no
+Ubuntu/WSL, inicie o serviço já instalado:
+
+```bash
+sudo systemctl start postgresql
+```
+
+Criar um usuário de aplicação, com senha solicitada interativamente, apenas se
+ele ainda não existir (ajuste os nomes se escolheu outros valores no `.env`):
+
+```bash
+sudo -u postgres createuser --pwprompt complaints_user
+```
+
+Criar um banco novo pertencente a esse usuário:
+
+```bash
+sudo -u postgres createdb --owner=complaints_user --encoding=UTF8 --template=template0 ecommerce_complaints
+```
+
+Se usar PostgreSQL remoto ou outra instalação, solicite ao administrador a criação
+equivalente do usuário e banco. Use a mesma senha configurada em `DB_PASSWORD`.
+
+Inicializar as oito tabelas do banco novo, com senha solicitada pelo `psql`:
+
+```bash
+psql -X -h localhost -p 5432 -U complaints_user -d ecommerce_complaints -v ON_ERROR_STOP=1 -f sql/init_database.sql
+```
+
+Os parâmetros do `psql` são explícitos: ajuste-os conforme seu `.env`. O script
+reúne schemas, Staging, dimensões, fatos e metadados em uma única transação. Ele
+recusa PostgreSQL anterior a 15 e qualquer objeto já existente em `staging`,
+`warehouse` ou `metadata`. A recusa é esperada se o banco já foi inicializado;
+não execute os scripts destrutivos separados para contorná-la. Migrações de
+bancos existentes não fazem parte desse procedimento.
+
+### MinIO e buckets
+
+Validar a configuração sem imprimir as credenciais:
+
+```bash
+docker compose config --quiet
+```
+
+Iniciar o serviço:
+
+```bash
+docker compose up -d
+```
+
+Após o MinIO ficar disponível, criar os buckets ausentes:
+
+```bash
+python -m src.storage.initialize_buckets
+```
+
+O comando pode ser repetido; buckets existentes, seus objetos e permissões são
+preservados. Erros de conexão ou permissão são propagados. Se o serviço ainda
+estiver iniciando, aguarde e repita. Console: `http://localhost:9001`.
+
+### Verificar a instalação sem executar cargas
+
+Conferir imports:
+
+```bash
+python -c "import boto3, botocore, pandas, pyarrow, psycopg, sqlalchemy, streamlit, plotly, pytest; print('Imports completos: OK')"
+```
+
+Conferir a CLI:
+
+```bash
+python main.py --help
+```
+
+Executar os testes sem habilitar integrações PostgreSQL:
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= python -m pytest -q
+```
+
+Resultado da etapa 2 (27/10/2026): **35 aprovados, 10 pulados e 5 subtestes
+aprovados** no ambiente virtual novo; instalação, `pip check`, imports e CLI
+aprovados. Em PostgreSQL 18.6 temporário, a inicialização criou oito tabelas e
+recusou uma segunda execução, preservando tabelas e auditoria fictícia. O Compose
+passou na validação de configuração; o provisionamento real do MinIO não foi
+reexecutado. Seu inicializador foi validado com cliente simulado (existência,
+criação e erro de permissão).
+
+O banco recém-criado fica sem dados de reclamações. A instalação não executa a
+pipeline; o dashboard deve informar que não há períodos carregados. As fixtures
+de integração agora são preparadas automaticamente; o CI está configurado. Veja a seção 12.
 
 ## 1. Entrar no projeto e ativar o Python
 
@@ -49,6 +199,21 @@ deactivate
 ```
 
 Verificar dependências:
+
+Dependências reorganizadas em 27/10/2026: `requirements/base.txt` contém a
+pipeline; `requirements/dashboard.txt` e `requirements/dev.txt` complementam a
+base com dashboard e testes. `requirements.txt` inclui os três grupos:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+Para instalar somente a pipeline, use `python -m pip install -r requirements/base.txt`.
+Para adicionar testes à base, use `python -m pip install -r requirements/base.txt -r requirements/dev.txt`.
+Foram incluídos `boto3`, `botocore`, `streamlit` e `plotly`. As dependências
+transitivas também estão fixadas por constraints; a instalação completa foi
+validada em um ambiente virtual novo na etapa 2. Consulte o roteiro da seção 0.
+
 
 ```bash
 python -c "import pandas, boto3, sqlalchemy, pyarrow; print('[OK] Dependências importadas')"
@@ -218,7 +383,12 @@ python main.py 2026-07 --source local --skip-gold
 
 
 > [!NOTE]
-> **Controle de concorrência:** o `main.py` mantém o mesmo PostgreSQL Advisory Lock durante toda a pipeline. Uma segunda execução cooperativa recebe `RuntimeError: Outra operação Gold está em andamento.` O lock também é utilizado pela recuperação administrativa.
+> **Controle de concorrência — etapa 4:** o `main.py` mantém o Advisory Lock `20261020` durante toda a pipeline, com as etapas Python no mesmo processo. Os comandos avulsos abaixo também usam esse lock, reutilizado somente dentro do mesmo processo/thread/contexto. Uma operação concorrente falha com `Outra operação Gold está em andamento.`; não há opção de dispensa. Configure todos os comandos para o mesmo PostgreSQL e banco. Operações locais e MinIO que gravam dados também precisam do banco disponível para adquirir o lock. `--help` e a listagem do catálogo não abrem conexão.
+
+O lock é liberado entre comandos avulsos. Para manter exclusão mútua durante a
+sequência completa Bronze → Silver → Staging → Gold, execute `main.py`.
+Use as CLIs com `python -m` na raiz do projeto e mantenha o mesmo `.env`.
+Provisionamento de banco/buckets continua separado das operações de dados.
 
 ## 5. Testes por etapa
 
@@ -299,16 +469,34 @@ python -m src.database.load_staging 2026-07 --source minio
 ```
 
 > [!WARNING]
-> Esse comando altera `staging.complaints` e, quando executado isoladamente, não adquire automaticamente o lock do `main.py`.
+> Esse comando altera `staging.complaints` sob o mesmo Advisory Lock da pipeline, inclusive quando executado isoladamente. Ele não carrega a Gold.
 
-### 5.5 Carregar Gold isoladamente
+### 5.5 Carregar Gold isoladamente com auditoria
+
+Usa a Staging já preparada, valida o mês e mantém o lock até concluir a auditoria:
 
 ```bash
-psql -h localhost -U complaints_user -d ecommerce_complaints -v ON_ERROR_STOP=1 -f sql/warehouse/load_star_schema.sql
+python -m src.database.load_gold 2026-07
 ```
 
-> [!CAUTION]
-> Este comando modifica a Gold e não passa pelo mecanismo Python de auditoria ou pelo Advisory Lock do `main.py`. Prefira a pipeline orquestrada para operações normais. **Não execute `sql/warehouse/create_star_schema.sql` em um banco com dados a preservar.**
+Se a Staging contiver outro mês, a Gold não será alterada. Uma falha após o
+registro `RUNNING` passa pelo encerramento `FAILED`. As transações de auditoria
+continuam independentes da transação Gold; falha após COMMIT não desfaz a carga.
+
+### 5.6 SQL Gold administrativo
+
+O wrapper abaixo adquire o mesmo lock em nível de transação e exige período:
+
+```bash
+psql -X -h localhost -U complaints_user -d ecommerce_complaints -v ON_ERROR_STOP=1 -v expected_period=2026-07 -f sql/warehouse/load_star_schema.sql
+```
+
+Ajuste `expected_period` para o mês solicitado. O wrapper recusa lock ocupado e
+faz rollback em falhas de período, qualidade ou contagem. Ele usa o mesmo corpo
+SQL da CLI, mas **não registra auditoria Python**; prefira o comando da seção 5.5.
+`load_star_schema_body.sql` é interno e exige lock na própria sessão.
+SQL arbitrário que ignore o lock não recebe proteção automática.
+**Não execute `sql/warehouse/create_star_schema.sql` em banco com dados a preservar.**
 
 ## 6. Backfill histórico
 
@@ -316,7 +504,7 @@ psql -h localhost -U complaints_user -d ecommerce_complaints -v ON_ERROR_STOP=1 
 > No inventário de 26/10/2026, havia Bronze para janeiro, fevereiro, março, abril, julho, agosto e setembro. Maio e junho ainda não estavam localizados. O Consumidor.gov.br é intermitente; o backfill consulta a fonte e usa metadados em cache quando ela falha. `--delay` controla o intervalo entre downloads, **não** implementa repetição automática da mesma tentativa em `download_zip()`. Uma nova execução pode retomar períodos pendentes. O retorno com código 1 pode indicar coleta incompleta.
 
 
-Tentar recuperar maio e junho de 2026:
+Conferir Bronze de maio e junho de 2026 (já recuperados e carregados em 27/10/2026):
 
 ```bash
 python -m src.ingestion.backfill --year 2026 --start-month 5 --end-month 6 --delay 5
@@ -335,6 +523,64 @@ tail -n 50 logs/backfill.log
 ```
 
 A API do Consumidor.gov.br pode retornar 503/504. Períodos não recuperados podem permanecer `PENDING`; isso não implica perda dos objetos previamente armazenados.
+
+### 6.1. Arquivos especiais de maio e junho/2026
+
+Os arquivos recuperados em `data/diagnostics/` têm particularidades: maio contém
+um `.7z` dentro do ZIP e junho usa Deflate64. A leitura ZIP da pipeline requer
+uma cópia compatível, com CSV direto e compressão Deflate. O utilitário abaixo
+requer o executável **7z** no PATH, valida a integridade da origem, extrai o CSV,
+gera o ZIP em `data/raw/` e imprime hashes SHA-256. Ele preserva o original e
+recusa sobrescrever um destino existente; não altera datas ou valores do CSV.
+
+Preparar maio, somente se o ZIP normalizado ainda não existir:
+
+```bash
+python scripts/prepare_bronze_zip.py 2026-05 data/diagnostics/finalizadas_2026-05.zip
+```
+
+Preparar junho:
+
+```bash
+python scripts/prepare_bronze_zip.py 2026-06 data/diagnostics/finalizadas_2026-06.zip
+```
+
+Na carga de 27/10/2026, os originais foram preservados localmente e no bucket
+`ecommerce-bronze`, em `consumidor_gov/ano=2026/mes=05/original/` e
+`consumidor_gov/ano=2026/mes=06/original/`, com o nome original e SHA-256 nos
+metadados. Os caminhos Bronze canônicos receberam as cópias normalizadas.
+
+Publicar as cópias normalizadas no MinIO, se necessário:
+
+```bash
+python -m src.storage.sync_data_lake bronze 2026-05
+```
+
+```bash
+python -m src.storage.sync_data_lake bronze 2026-06
+```
+
+Reprocessar cada período usando a Bronze já publicada (modifica Silver, Staging
+e Gold; substitui os fatos do mês e registra nova auditoria):
+
+```bash
+python main.py 2026-05 --source minio
+```
+
+```bash
+python main.py 2026-06 --source minio
+```
+
+Carga concluída em 27/10/2026: maio **352.367**, junho **417.801**, auditorias
+**64 e 65 / SUCCESS**. Os CSVs transformados e Parquets foram comparados linha a
+linha. Contagens, quantidades/somas de notas e tempos e totais de booleanos foram
+conferidos contra a Gold; zero fatos órfãos. Contagens e somas de IDs, tempos e
+notas dos outros sete meses permaneceram iguais. O controle de ingestão foi
+atualizado para `DOWNLOADED` nos dois períodos.
+
+O relatório local `data/diagnostics/load_2026_05_06_report.json` registra a
+comparação anterior/posterior da carga. Consulte a seção 9 para conferir as
+contagens atuais. Os downloads originais e esse relatório não são versionados.
 
 ## 7. Cron: execução agendada do backfill
 
@@ -427,7 +673,7 @@ GROUP BY TO_CHAR(t.data, 'YYYY-MM')
 ORDER BY periodo;
 ```
 
-Referência validada em 26/10/2026: jan 287.036; fev 306.344; mar 309.267; abr 341.338; jul 431.744; ago 394.120; set 358.865; **total 2.428.714**. Maio e junho ainda não possuem dados carregados.
+Referência validada em 27/10/2026: jan 287.036; fev 306.344; mar 309.267; abr 341.338; **mai 352.367; jun 417.801**; jul 431.744; ago 394.120; set 358.865; **total 3.198.882**. Auditorias de maio e junho: **64 e 65 / SUCCESS**. A Staging final contém junho; o controle de ingestão registra os dois meses como `DOWNLOADED`.
 
 Contagem total da Gold:
 
@@ -488,12 +734,216 @@ ORDER BY status;
 **Somente após verificar que não existe carga Gold legítima em andamento** e que todas as operações relevantes respeitam o lock compartilhado:
 
 ```bash
-python -c "from src.database.gold_audit import recover_interrupted_executions; print('Execuções recuperadas:', recover_interrupted_executions(timeout_minutes=60))"
+python -m src.database.gold_audit recover --timeout-minutes 60
 ```
 
 O procedimento marca registros `RUNNING` com mais de 60 minutos como `FAILED`, com horário e mensagem de recuperação. Ele modifica `metadata.gold_load_control`, **não** os fatos da Gold. O lock impede concorrência com operações cooperativas, mas o tempo limite sozinho não prova interrupção.
 
 ## 12. Testes automatizados
+
+### Suíte padrão: sem PostgreSQL
+
+Desativar os dois modos de integração, inclusive se houver opções no `.env`:
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= .venv/bin/python -m pytest -q
+```
+
+Resultado após a etapa 7: **128 aprovados, 53 pulados e 5 subtestes aprovados**.
+Os 53 testes de integração são pulados antes de conectar. As variáveis são
+explicitamente vazias para impedir que `load_dotenv()` reative as integrações.
+`pytest.ini` continua limitando a descoberta a `tests/`.
+
+### Suíte completa em cluster local descartável
+
+Requer PostgreSQL **15+**, binários `initdb`, `pg_ctl` e `psql`, `pg_config` no
+PATH e usuário sem root. Cada grupo cria cluster/socket exclusivos em `/tmp`,
+sem escuta TCP, e seu próprio banco `eci_<uuid>_test`. Os schemas são criados
+pelos SQLs reais e as classes antigas recebem automaticamente duas reclamações
+sintéticas de julho. Não depende de arquivos de dados, API ou MinIO real.
+
+```bash
+env -u TEST_DB_NAME RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest -q
+```
+
+Selecionar a instalação PostgreSQL e gerar relatório JUnit:
+
+```bash
+env -u TEST_DB_NAME RUN_TEMP_POSTGRES_TESTS=1 PG_BIN=/usr/lib/postgresql/18/bin .venv/bin/python -m pytest -q --junitxml=test-results/local.xml
+```
+
+Resultado atual validado em PostgreSQL 18.6: **181 aprovados, zero pulados e 5 subtestes
+aprovados**. `RUN_TEMP_POSTGRES_TESTS=1` tem precedência e ignora `DB_*` e
+`TEST_DB_NAME` para conexão. Se o sandbox impedir sockets, a execução precisa
+de autorização para sair do sandbox. O banco é removido e o servidor encerrado
+ao sair do contexto, inclusive nas falhas de preparação cobertas pelos testes.
+
+### Servidor PostgreSQL de testes: mesmo modo usado pelo CI
+
+Configure `DB_HOST`, `DB_PORT`, `DB_USER` e `DB_PASSWORD` para um servidor de
+testes. `TEST_DB_NAME` deve apontar para um banco de controle já existente,
+terminado em `_test` e diferente de `DB_NAME`; letras minúsculas, números e
+underscores, começando por letra, até 63 caracteres. O usuário precisa de
+**CREATEDB** e o cliente `psql` precisa estar no PATH.
+
+```bash
+env RUN_TEMP_POSTGRES_TESTS= TEST_DB_NAME=ecommerce_complaints_test .venv/bin/python -m pytest -q --junitxml=test-results/server.xml
+```
+
+Esse comando não reutiliza tabelas no banco de controle: cada grupo cria,
+inicializa e remove seu próprio banco aleatório `eci_<uuid>_test` no servidor.
+Somente bancos cujo CREATE desta execução teve sucesso entram na limpeza.
+O controle não recebe fixtures, DROP de tabelas nem atualizações de auditoria;
+não precisa conter os schemas da aplicação. Use credenciais de testes.
+A configuração da aplicação é restaurada ao final das classes e após falhas.
+
+Modo servidor validado em cluster PostgreSQL 18.6 privado: **177 aprovados, sem
+pulos**, tabela sentinela do controle preservada e nenhum banco descartável
+restante. O banco da aplicação não foi acessado. Se faltar CREATEDB, use o modo
+local ou uma conta de testes com esse privilégio; a suíte não tenta reutilizar
+um banco com dados como alternativa.
+
+### Compatibilidade com unittest
+
+Executar sem PostgreSQL:
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= .venv/bin/python -m unittest tests.test_gold_audit tests.test_gold_recovery tests.test_gold_lock -v
+```
+
+Executar com preparação automática em cluster local:
+
+```bash
+env -u TEST_DB_NAME RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m unittest tests.test_gold_audit tests.test_gold_recovery tests.test_gold_lock -v
+```
+
+Ou no servidor de testes:
+
+```bash
+env RUN_TEMP_POSTGRES_TESTS= TEST_DB_NAME=ecommerce_complaints_test .venv/bin/python -m unittest tests.test_gold_audit tests.test_gold_recovery tests.test_gold_lock -v
+```
+
+Resultado validado no modo servidor: **11 testes aprovados**, incluindo os dez
+PostgreSQL e a validação de timeout com cinco subtestes. Não é necessário
+preparar julho, Staging, Gold ou auditoria manualmente.
+
+### CI no GitHub Actions
+
+Workflow: [`.github/workflows/tests.yml`](../.github/workflows/tests.yml).
+Disparos: push, pull request e manual. Configuração:
+
+- Job unitário com PostgreSQL desabilitado, verificação de dependências e sintaxe.
+- Matriz PostgreSQL **15 e 18**, cada serviço com seu próprio banco de controle,
+  credenciais sintéticas, health check e porta atribuída pelo runner.
+- Python da `.python-version`, instalação de `requirements.txt`, cliente psql e 7z.
+- A matriz executa toda a suíte e reprova se houver qualquer teste pulado.
+- Relatórios JUnit como artefatos por sete dias, inclusive nas falhas que gerarem relatório.
+- Actions fixadas por SHA e token com `contents: read`; não usa secrets da aplicação nem executa deploy.
+
+A definição foi validada localmente com **actionlint 1.7.12** e o modo de
+servidor foi reproduzido com PostgreSQL 18.6 privado. A validação da etapa 6 foi local; a execução hospedada e a matriz PostgreSQL 15
+devem ser confirmadas na aba Actions após o envio desta branch. O workflow é
+reconhecido pelo GitHub quando o arquivo versionado é enviado.
+
+Referências oficiais usadas na configuração: [serviços PostgreSQL no GitHub Actions](https://docs.github.com/en/actions/tutorials/use-containerized-services/create-postgresql-service-containers),
+[setup-python](https://github.com/actions/setup-python) e
+[actionlint](https://github.com/rhysd/actionlint).
+
+### Revisão da etapa 3: qualidade e regressões da pipeline
+
+Executar os testes de conversão, ZIP, fluxo Bronze → Silver, bloqueio de dados
+inválidos antes da Staging e encerramento da auditoria (sem PostgreSQL ou MinIO):
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= .venv/bin/python -m pytest tests/test_pipeline_quality.py tests/test_gold_orchestration.py tests/test_integrated_quality.py -q
+```
+
+Valores preenchidos inválidos em `Tempo Resposta`, `Nota do Consumidor`,
+`Procurou Empresa` e `Respondida` interrompem a transformação. Números infinitos
+também são rejeitados; booleanos da origem aceitam `S` e `N`. Nulos de origem
+continuam permitidos nos campos opcionais, com coerência de nota/avaliação.
+A leitura CSV mantém os marcadores de ausência padrão do Pandas.
+
+Ingestão, backfill e transformação aceitam exatamente um CSV mensal não vazio,
+na raiz ou em subpasta do ZIP. Arquivos sem esse CSV, vazios ou com mais de um
+candidato são rejeitados. Não há extração para o sistema de arquivos.
+
+### SQL Gold em PostgreSQL temporário
+
+No modo local, os testes abaixo criam um cluster isolado em `/tmp`, um banco `eci_<uuid>_test` e
+seus schemas, usando socket Unix em diretório exclusivo, sem escuta TCP.
+Não se conectam com `DB_*` ou `TEST_DB_NAME`. Requerem binários PostgreSQL 15+
+(`initdb`, `pg_ctl`, `psql`), `pg_config` no PATH e execução por usuário sem root.
+Se o sandbox bloquear sockets, a execução precisa de autorização para sair do sandbox.
+
+```bash
+env -u TEST_DB_NAME RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest tests/test_gold_transaction.py -q
+```
+
+Para indicar a instalação PostgreSQL explicitamente:
+
+```bash
+env -u TEST_DB_NAME RUN_TEMP_POSTGRES_TESTS=1 PG_BIN=/usr/lib/postgresql/18/bin .venv/bin/python -m pytest tests/test_gold_transaction.py -q
+```
+
+Resultado atual em PostgreSQL 18.6 após a etapa 6: **33 aprovados**. Verificam parâmetro
+obrigatório, mês divergente, Staging vazia/mista, qualidade, rollback após
+DELETE e inserção de dimensões, e reprocessamento preservando os fatos de
+outro mês. A etapa 6 acrescentou rollback real do DROP/CREATE/INSERT da Staging
+e recusa da inicialização sobre schemas existentes. As comparações de rollback incluem fatos e dimensões completos.
+Também verificam exclusão mútua de comandos em processos separados, SQL/Python
+nos dois sentidos, liberação após falha, recuperação administrativa e pipeline
+completa com dados sintéticos. O caminho MinIO usa cliente S3 simulado;
+Staging/Gold são reais no cluster temporário. O servidor é encerrado e o
+diretório temporário é removido ao finalizar.
+
+Na conferência somente de leitura, os nove ZIPs Bronze de janeiro a setembro/2026
+passaram pela transformação e qualidade novas; os **3.198.882 registros** foram
+comparados com os nove Parquets existentes, com igualdade completa dos DataFrames.
+Nenhum arquivo de dados foi gravado e nenhuma carga foi executada no banco da aplicação.
+
+A preparação automática das integrações e o workflow CI foram concluídos na
+etapa 6. A medição/otimização foi concluída na etapa 7. Ao concluir cada etapa ou revisão,
+atualizar README.md e este manual e solicitar autorização para avançar.
+
+### Etapa 4: comandos e concorrência
+
+Executar regressões de lock e ajuda das CLIs sem PostgreSQL:
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= .venv/bin/python -m pytest tests/test_operation_lock.py tests/test_gold_orchestration.py -q
+```
+
+Os testes reais de concorrência estão em `tests/test_gold_transaction.py`,
+habilitados pelo modo local ou pelo servidor de testes acima. Os testes de
+`tests/test_gold_lock.py` também recebem preparação automática nos dois modos.
+
+| Operação | Comando protegido |
+| --- | --- |
+| Pipeline completa | `python main.py 2026-07 --source minio` |
+| Ingestão Bronze local | `python -m src.ingestion.download_complaints 2026-07` |
+| Backfill Bronze | `python -m src.ingestion.backfill --year 2026 --start-month 7 --end-month 7` |
+| Transformação e publicação Silver | `python -m src.transformation.transform_complaints 2026-07 --source minio --upload-silver` |
+| Staging | `python -m src.database.load_staging 2026-07 --source minio` |
+| Gold auditada | `python -m src.database.load_gold 2026-07` |
+| Upload Bronze/Silver | `python -m src.storage.sync_data_lake silver 2026-07` |
+| Download para cache | `python -m src.storage.download_from_minio silver 2026-07` |
+| Recuperação de auditoria | `python -m src.database.gold_audit recover --timeout-minutes 60` |
+| Normalização Bronze | `python scripts/prepare_bronze_zip.py 2026-05 data/diagnostics/finalizadas_2026-05.zip` |
+| Download pelo catálogo | `python scripts/download_direct.py` (lock por arquivo) |
+
+Todos esses comandos de gravação precisam de PostgreSQL acessível e usam o
+mesmo banco configurado em `DB_*`. Execute normalização apenas se o destino
+não existir. O download do catálogo pode sobrescrever arquivos existentes;
+`--listar` apenas exibe os itens e não adquire lock.
+
+O `flock` de `scripts/run_backfill.sh` continua como proteção local adicional;
+quando ocupado, o script retorna código 1. O backfill Python usa o Advisory
+Lock mesmo sem passar pelo script Bash. A exclusão mútua não abrange bancos
+diferentes, SQL arbitrário, scripts externos ou downloads pelo navegador.
+Provisionamento deve seguir os comandos da seção 0 em ambiente apropriado.
+
+### Verificações e comandos por módulo
 
 Verificar sintaxe e imports:
 
@@ -527,30 +977,30 @@ Executar testes por módulo:
 **Executar testes de auditoria**
 
 ```bash
-python -m unittest discover -s tests -p "test_gold_audit.py" -v
+env -u TEST_DB_NAME RUN_TEMP_POSTGRES_TESTS=1 python -m unittest discover -s tests -p "test_gold_audit.py" -v
 ```
 
 **Executar testes de recuperação**
 
 ```bash
-python -m unittest discover -s tests -p "test_gold_recovery.py" -v
+env -u TEST_DB_NAME RUN_TEMP_POSTGRES_TESTS=1 python -m unittest discover -s tests -p "test_gold_recovery.py" -v
 ```
 
 **Executar testes de concorrência**
 
 ```bash
-python -m unittest discover -s tests -p "test_gold_lock.py" -v
+env -u TEST_DB_NAME RUN_TEMP_POSTGRES_TESTS=1 python -m unittest discover -s tests -p "test_gold_lock.py" -v
 ```
 
 
 Executar os testes da Gold em conjunto:
 
 ```bash
-python -m unittest discover -s tests -p "test_gold_*.py" -v
+env -u TEST_DB_NAME RUN_TEMP_POSTGRES_TESTS=1 python -m unittest discover -s tests -p "test_gold_*.py" -v
 ```
 
 > [!NOTE]
-> Referência anterior (20/10/2026): 11 testes específicos da Gold. Última suíte geral informada (26/10/2026): **30 testes + 5 subtestes aprovados** com `python -m pytest tests/ -q`. Alguns testes alteram auditoria em ambiente isolado; não execute testes com escrita no banco principal ou durante cargas.
+> Referência histórica (26/10/2026): **30 testes + 5 subtestes aprovados**. Na etapa 1 (27/10/2026), a suíte sem integração apresentou **32 aprovados, 10 pulados e 5 subtestes aprovados**. Naquela etapa, a integração real não foi reexecutada. Na etapa 6, os testes PostgreSQL passaram a receber bancos novos e fixtures automaticamente e foram executados nos dois modos.
 
 ## 13. Teste manual do Advisory Lock entre processos
 
@@ -635,7 +1085,82 @@ tail -n 50 logs/backfill-cron.log
 
 ## 15. Dashboard Streamlit (em desenvolvimento)
 
-O dashboard consulta a Gold do PostgreSQL diretamente por SQL agregado. A primeira versão já foi validada com **2.428.714 reclamações** em sete meses. As cinco opções da navegação personalizada funcionam, mas as páginas detalhadas ainda são provisórias.
+O dashboard consulta a Gold em modo somente leitura. Na visão geral, selecione
+2026 e os meses carregados de janeiro a setembro: o total conferido na etapa 5
+é **3.198.882 reclamações**. A conferência com os nove Parquets também validou
+**1.812 nomes de empresas**, **27 UFs**, tempo médio **6,23** e nota média **2,38**.
+Os rankings, a distribuição por UF e a evolução mensal coincidiram com a Silver.
+As quatro páginas especializadas continuam provisórias.
+
+### Definições dos indicadores e filtros
+
+| Indicador | Definição no recorte selecionado |
+| --- | --- |
+| Reclamações | Quantidade de registros Gold pela data de finalização |
+| Empresas (nome fantasia) | `COUNT(DISTINCT BTRIM(nome_fantasia))`; segmentos do mesmo nome são agrupados, como no ranking |
+| UFs | UFs com registros, incluindo DF |
+| Tempo médio de resposta | Média dos tempos preenchidos; base exibida é a quantidade desses valores |
+| Nota média informada (1 a 5) | Média das notas preenchidas, independentemente do rótulo de avaliação; base exibida é a quantidade de notas |
+
+A unidade de tempo é a registrada na fonte; não se presume dias ou horas.
+Ausência de valor aparece como `N/D` se não houver base para calcular a média;
+zero de tempo permanece zero. Nomes fantasia não são uma contagem de CNPJs.
+As áreas têm espaços externos removidos e nulos/vazios agrupados como
+`Não informado`. Rankings mostram até 15 grupos e não medem taxa por cliente/venda.
+
+Somente meses com carga no ano escolhido podem ser selecionados. A troca de
+ano oferece os meses daquele ano; o padrão é selecionar todos os disponíveis.
+Todos os KPIs e gráficos da visão geral seguem a seleção, inclusive a evolução
+mensal. Limpar os meses suspende a consulta dos indicadores. Meses sem carga
+aparecem em uma mensagem separada, sem barras de zero.
+
+Os cinco conjuntos da visão geral usam um único snapshot PostgreSQL
+`REPEATABLE READ, READ ONLY` e são cacheados juntos por dez minutos. O catálogo
+de períodos também é cacheado. Para renovar os resultados após uma carga,
+clique **Atualizar dados** na barra lateral; isso limpa o cache analítico e
+reconsulta os dados, sem executar carga nem precisar reiniciar o Streamlit.
+
+Na conferência de janeiro a setembro/2026, as bases foram **3.029.881 tempos**
+e **995.804 notas**. Cinco notas sem rótulo de avaliação continuam na média de
+notas preenchidas. Espaços externos nos nomes históricos explicavam 1.872
+nomes na Gold versus 1.812 na Silver; a consulta padronizada resolveu o
+agrupamento sem alterar o warehouse. A referência antiga de 1.850 empresas
+usava outro período e contagem por IDs e não é diretamente comparável.
+
+### Testes da etapa 5
+
+Instalar os grupos necessários aos testes do dashboard:
+
+```bash
+python -m pip install -r requirements/base.txt -r requirements/dashboard.txt -r requirements/dev.txt
+```
+
+Testar as definições e interações do dashboard sem PostgreSQL:
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= .venv/bin/python -m pytest tests/test_dashboard_semantics.py tests/test_dashboard_ui.py -q
+```
+
+São **21 testes**, incluindo Streamlit AppTest para filtros, gráficos,
+seleção vazia, zero/N/D, bases, atualização e navegação. Os dados são sintéticos;
+nenhuma conexão ao banco da aplicação é aberta. Em instalações somente da
+pipeline, sem as dependências do dashboard, esses módulos de teste são pulados.
+
+Testar as fórmulas SQL em cluster temporário, com os mesmos pré-requisitos
+PostgreSQL da seção 12:
+
+```bash
+env -u TEST_DB_NAME RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest tests/test_dashboard_postgres.py -q
+```
+
+Resultado após a etapa 7: **8 aprovados em PostgreSQL 18.6**. Usa banco próprio em `/tmp`,
+compara médias/bases, agrupa nome fantasia entre segmentos e espaços, verifica
+que todos os gráficos usam o recorte e confirma snapshot/read-only, incluindo
+rejeição de CTE com DELETE. A etapa 7 acrescentou planos reais em leitura e
+igualdade da fórmula otimizada, incluindo grupos de tamanhos diferentes. Não
+executa cargas no banco da aplicação.
+
+### Execução local
 
 > [!NOTE]
 > Execute na raiz do projeto, com `.venv` ativo e PostgreSQL disponível. O acesso foi testado em `http://localhost:8501` sob Windows/WSL. A mensagem `gio: ... Operation not supported` refere-se à tentativa de abrir o navegador no WSL, e não necessariamente a um erro da aplicação.
@@ -643,7 +1168,7 @@ O dashboard consulta a Gold do PostgreSQL diretamente por SQL agregado. A primei
 **Instalar dependências do dashboard (se ausentes)**
 
 ```bash
-python -m pip install streamlit plotly
+python -m pip install -r requirements/base.txt -r requirements/dashboard.txt
 ```
 
 **Executar o dashboard**
@@ -686,9 +1211,10 @@ ORDER BY t.ano, t.mes;
 ```text
 dashboard/
 ├── app.py
-├── services/analytics.py
+├── services/analytics.py       # cache e leitura em snapshot
+├── services/overview.py        # fórmulas e consultas do recorte
 ├── components/navigation.py
-├── components/filters.py       # esqueleto
+├── components/filters.py       # ano e meses carregados
 └── views/
     ├── overview.py
     ├── companies.py
@@ -820,6 +1346,73 @@ git status
 
 Confira o caminho real do arquivo de comandos (`docs/Comandos.md`) antes de executar `git add`. Não inclua `.env`, senhas, dados sensíveis ou arquivos grandes de processamento no commit.
 
+## 18. Medição e desempenho das consultas — etapa 7
+
+Relatório completo: [Desempenho.md](Desempenho.md). A otimização foi escolhida
+após medir os planos da Gold com 3.198.882 reclamações; nenhum índice ou
+parâmetro global foi alterado.
+
+### Benchmark somente de leitura
+
+Execute na raiz do projeto, com dependências base/dashboard instaladas e
+`DB_*` apontando para o banco a medir. O comando não carrega dados nem adquire
+o lock exclusivo da pipeline. Usa um snapshot `REPEATABLE READ, READ ONLY`,
+timeout de 60 segundos por instrução e espera máxima de três segundos por lock.
+EXPLAIN ANALYZE executa os SELECTs e consome recursos do servidor; escolha um
+período apropriado para medir. Não há consultas de escrita.
+
+```bash
+python scripts/benchmark_dashboard.py --year 2026 --months 1 2 3 4 5 6 7 8 9 --single-month 7 --repetitions 3 --warmup 1 --compare-kpis --output data/diagnostics/dashboard_benchmark_nova_execucao.json
+```
+
+- `--months`: recorte amplo explícito; `--single-month`: recorte de um mês.
+- `--repetitions` e `--warmup`: amostras e aquecimentos por consulta/variante.
+- `--compare-kpis`: compara valores com a fórmula de referência e alterna a
+  ordem das execuções; divergência interrompe o benchmark.
+- `--timeout-ms`: limite por instrução, em milissegundos.
+- `--output`: JSON novo com parâmetros, SQL/hashes, contexto, índices e planos;
+  caminho existente é recusado. Não inclui URL de conexão ou senha.
+
+O benchmark ignora o cache Streamlit e não limpa os caches PostgreSQL/SO.
+Não mede renderização ou tempo de rede da interface. Os buffers dos nós
+superiores incluem os filhos; não some os mesmos blocos novamente.
+
+### Resultado observado e decisão
+
+| KPIs, comparação alternada de três execuções | Referência | Atual |
+| --- | ---: | ---: |
+| Janeiro a setembro/2026 | 5.586,00 ms | 1.483,21 ms |
+| Julho/2026 | 655,47 ms | 493,73 ms |
+
+No recorte amplo, redução de **73,45%**, com todos os valores iguais. A consulta
+agrega por nome fantasia/UF antes do DISTINCT e calcula as médias pela soma e
+quantidade dos valores preenchidos. O benchmark também identificou estimativa
+defasada na dimensão de tempo; revisão de estatísticas e experimento de índice
+por `data_id` devem ser medidos separadamente, sem atribuir ganho não observado.
+
+A referência está em `sql/analytics/dashboard_kpis_reference.sql` e não é
+usada pelo dashboard. No CI, não há limiares de tempo; os testes verificam
+fórmulas, pesos, nulos, recorte e transação de leitura.
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= .venv/bin/python -m pytest tests/test_dashboard_benchmark.py tests/test_dashboard_semantics.py tests/test_dashboard_ui.py -q
+```
+
+São **23 testes sem PostgreSQL**. Os **8 testes SQL do dashboard**, incluindo
+benchmark e conferência da fórmula otimizada, usam a preparação automática:
+
+```bash
+env -u TEST_DB_NAME RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest tests/test_dashboard_postgres.py -q
+```
+
+Suíte completa após a etapa 7: **181 aprovados, nenhum pulado e 5 subtestes
+aprovados** em PostgreSQL descartável. Sem integrações: **128 aprovados, 53
+pulados e 5 subtestes aprovados**. Evidências locais em
+`data/diagnostics/dashboard_step7_{initial,before,candidate,after}.json`, não
+versionadas. As sete etapas estão concluídas localmente. A execução hospedada
+do CI, as páginas especializadas e o usuário PostgreSQL somente leitura
+continuam pendentes, fora dessa sequência.
+
 ---
 
-**Última atualização: 26/10/2026.** Manual atualizado com a expansão histórica e o dashboard Streamlit. Comandos isolados podem não utilizar as proteções da orquestração principal.
+**Última atualização: 27/10/2026.** Etapa 7 concluída: benchmark reproduzível, otimização dos KPIs validada e sete etapas encerradas localmente. A execução hospedada do CI deve ser confirmada na aba Actions.

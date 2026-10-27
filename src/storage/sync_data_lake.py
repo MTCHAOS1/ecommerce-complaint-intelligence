@@ -1,3 +1,5 @@
+from src.database.gold_lock import exclusive_operation
+
 import argparse
 import re
 from pathlib import Path
@@ -145,6 +147,7 @@ def validate_remote_object(bucket_name, object_name, expected_size):
 # SINCRONIZAÇÃO COM MINIO
 # ============================================================
 
+@exclusive_operation
 def sync_layer(layer, period):
     """
     Sincroniza um arquivo local com o bucket correspondente.

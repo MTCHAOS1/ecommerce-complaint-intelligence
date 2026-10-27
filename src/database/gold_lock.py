@@ -2,6 +2,10 @@
 """Controle de concorrência da camada Gold."""
 
 from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
+import os
+import threading
 
 from sqlalchemy import text
 
@@ -10,6 +14,9 @@ from src.database.connection import get_engine
 
 # Identificador exclusivo do bloqueio da pipeline.
 GOLD_LOCK_ID = 20261020
+
+# Nunca é transmitido por argumento CLI ou variável de ambiente.
+_ACTIVE_OPERATION = ContextVar("pipeline_operation", default=None)
 
 
 @contextmanager
@@ -41,10 +48,12 @@ def gold_execution_lock():
                     "Outra operação Gold está em andamento."
                 )
 
+            token = _ACTIVE_OPERATION.set((os.getpid(), threading.get_ident(), connection))
             try:
-                yield
+                yield connection
 
             finally:
+                _ACTIVE_OPERATION.reset(token)
                 released = connection.execute(
                     text(
                         "SELECT pg_advisory_unlock(:lock_id)"
@@ -61,3 +70,23 @@ def gold_execution_lock():
 
     finally:
         engine.dispose()
+
+
+@contextmanager
+def pipeline_operation():
+    """Reutiliza o lock somente no mesmo processo/thread e contexto de chamada."""
+    active = _ACTIVE_OPERATION.get()
+    if active is not None and active[:2] == (os.getpid(), threading.get_ident()):
+        yield active[2]
+    else:
+        with gold_execution_lock() as connection:
+            yield connection
+
+
+def exclusive_operation(function):
+    """Protege uma operação pública, incluindo chamadas feitas fora da CLI."""
+    @wraps(function)
+    def protected(*args, **kwargs):
+        with pipeline_operation():
+            return function(*args, **kwargs)
+    return protected

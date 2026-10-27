@@ -14,7 +14,7 @@ exec 9>"$LOCK_FILE"
 
 if ! flock -n 9; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') | Outra execução do backfill está em andamento."
-    exit 0
+    exit 1
 fi
 
 cd "$PROJECT_DIR"

@@ -1,3 +1,5 @@
+from src.database.gold_lock import exclusive_operation
+
 
 import argparse
 from pathlib import Path
@@ -38,6 +40,7 @@ def get_object_info(layer, period):
     return bucket, object_key, filename
 
 
+@exclusive_operation
 def download_from_minio(layer, period):
     bucket, object_key, filename = get_object_info(
         layer,

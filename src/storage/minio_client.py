@@ -1,3 +1,5 @@
+from src.database.gold_lock import exclusive_operation
+
 import os
 from pathlib import Path
 
@@ -34,6 +36,7 @@ def get_minio_client():
     )
 
 
+@exclusive_operation
 def upload_file(local_path, bucket_name, object_name=None):
     """
     Envia um arquivo local para um bucket MinIO.

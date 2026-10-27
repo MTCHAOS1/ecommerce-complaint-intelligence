@@ -4,11 +4,12 @@ import unittest
 from sqlalchemy import text
 
 from src.database.connection import get_engine
+from tests.database_safety import PreparedDatabaseTestCase
 from src.database.gold_audit import recover_interrupted_executions
 from src.database.gold_lock import gold_execution_lock
 
 
-class TestGoldRecovery(unittest.TestCase):
+class TestGoldRecovery(PreparedDatabaseTestCase):
 
 
     def test_recovery_is_blocked_during_gold_execution(self):
@@ -188,6 +189,9 @@ class TestGoldRecovery(unittest.TestCase):
                     )
 
             engine.dispose()
+
+class TestGoldRecoveryValidation(unittest.TestCase):
+    """Validações de entrada que não abrem conexão com o banco."""
 
     def test_invalid_timeout_is_rejected(self):
         for invalid_timeout in [0, -1, 1.5, True, "60"]:

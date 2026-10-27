@@ -1,6 +1,7 @@
 """Baixa as publicações de reclamações finalizadas listadas no BaseUrl.json."""
 
 import argparse
+import sys
 from datetime import datetime
 import json
 from pathlib import Path
@@ -11,6 +12,9 @@ import zipfile
 import requests
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from src.database.gold_lock import exclusive_operation
 BASE_URL = "https://consumidor.gov.br/pages/publicacao/externo/{codigo}/download"
 PREFIXO = "Arquivo em formato CSV com dados de todas as reclamações finalizadas"
 
@@ -48,6 +52,7 @@ def carregar_arquivos(origem):
     return arquivos
 
 
+@exclusive_operation
 def baixar_arquivo(item, destino):
     nome = item["nomeArquivo"]
     url = BASE_URL.format(codigo=quote(str(item["codigo"]), safe=""))

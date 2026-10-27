@@ -4,13 +4,14 @@ import unittest
 from sqlalchemy import text
 
 from src.database.connection import get_engine
+from tests.database_safety import PreparedDatabaseTestCase
 from src.database.gold_lock import (
     GOLD_LOCK_ID,
     gold_execution_lock,
 )
 
 
-class TestGoldLock(unittest.TestCase):
+class TestGoldLock(PreparedDatabaseTestCase):
 
     def test_lock_is_acquired_and_released(self):
         """Verifica aquisição e liberação do bloqueio."""

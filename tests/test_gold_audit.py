@@ -10,6 +10,7 @@ from unittest.mock import patch
 from sqlalchemy import text
 
 from src.database.connection import get_engine
+from tests.database_safety import PreparedDatabaseTestCase
 from src.database.gold_audit import (
     count_gold_records,
     fail_gold_execution,
@@ -18,12 +19,14 @@ from src.database.gold_audit import (
 )
 
 
-class TestGoldAudit(unittest.TestCase):
+class TestGoldAudit(PreparedDatabaseTestCase):
     PERIOD = "2026-07"
 
     @classmethod
     def setUpClass(cls):
+        super().setUpClass()
         cls.engine = get_engine()
+        cls.addClassCleanup(cls.engine.dispose)
         with cls.engine.connect() as connection:
             cls.expected_staging = connection.execute(
                 text("SELECT COUNT(*) FROM staging.complaints")
@@ -36,6 +39,9 @@ class TestGoldAudit(unittest.TestCase):
                     WHERE t.ano = 2026 AND t.mes = 7
                 """)
             ).scalar_one()
+
+        if cls.expected_staging != 2 or cls.expected_gold != 2:
+            raise RuntimeError('Fixture sintética incompleta: esperados dois registros em julho.')
 
     @classmethod
     def tearDownClass(cls):

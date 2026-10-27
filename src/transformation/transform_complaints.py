@@ -2,10 +2,13 @@
 import argparse
 import re
 import zipfile
-
 from pathlib import Path
 
+from src.database.gold_lock import exclusive_operation
+
 import pandas as pd
+
+from src.ingestion.zip_members import select_csv_member
 
 from src.storage.download_from_minio import (
     download_from_minio,
@@ -118,16 +121,8 @@ def load_raw(zip_file, csv_name):
 
     with zipfile.ZipFile(zip_file) as archive:
 
-        files = archive.namelist()
-
-        if csv_name not in files:
-            raise FileNotFoundError(
-                f"{csv_name} não encontrado dentro de "
-                f"{zip_file}.\n"
-                f"Arquivos encontrados: {files}"
-            )
-
-        with archive.open(csv_name) as csv_file:
+        member = select_csv_member(archive, csv_name)
+        with archive.open(member) as csv_file:
             df = pd.read_csv(
                 csv_file,
                 sep=";",
@@ -209,15 +204,17 @@ def transform(df):
     # NUMÉRICOS
     # --------------------------------------------------------
 
-    df["tempo_resposta"] = pd.to_numeric(
-        df["tempo_resposta"],
-        errors="coerce",
-    )
-
-    df["nota_do_consumidor"] = pd.to_numeric(
-        df["nota_do_consumidor"],
-        errors="coerce",
-    )
+    for column in ("tempo_resposta", "nota_do_consumidor"):
+        source = df[column]
+        converted = pd.to_numeric(source, errors="coerce")
+        invalid = source.notna() & (
+            converted.isna() | converted.isin([float("inf"), float("-inf")])
+        )
+        if invalid.any():
+            raise ValueError(
+                f"{int(invalid.sum()):,} valores numéricos inválidos em {column}."
+            )
+        df[column] = converted
 
     # --------------------------------------------------------
     # BOOLEANOS
@@ -228,17 +225,14 @@ def transform(df):
         "N": False,
     }
 
-    df["procurou_empresa"] = (
-        df["procurou_empresa"]
-        .map(boolean_mapping)
-        .astype("boolean")
-    )
-
-    df["respondida"] = (
-        df["respondida"]
-        .map(boolean_mapping)
-        .astype("boolean")
-    )
+    for column in ("procurou_empresa", "respondida"):
+        source = df[column]
+        invalid = source.notna() & ~source.isin(boolean_mapping)
+        if invalid.any():
+            raise ValueError(
+                f"{int(invalid.sum()):,} valores booleanos inválidos em {column}."
+            )
+        df[column] = source.map(boolean_mapping).astype("boolean")
 
     # --------------------------------------------------------
     # STRINGS
@@ -361,21 +355,21 @@ def upload_silver(output_file, period):
 # PIPELINE DE TRANSFORMAÇÃO
 # ============================================================
 
-def main():
-    args = get_arguments()
+@exclusive_operation
+def run(period, source="local", upload=False):
 
     print("=" * 60)
-    print(f"TRANSFORMAÇÃO - {args.period}")
-    print(f"Origem Bronze: {args.source}")
+    print(f"TRANSFORMAÇÃO - {period}")
+    print(f"Origem Bronze: {source}")
     print(
         "Upload Silver: "
-        f"{'SIM' if args.upload_silver else 'NÃO'}"
+        f"{'SIM' if upload else 'NÃO'}"
     )
     print("=" * 60)
 
     zip_file, csv_name, output_file = get_files(
-        args.period,
-        args.source,
+        period,
+        source,
     )
 
     df = load_raw(
@@ -387,18 +381,21 @@ def main():
 
     validate_period(
         df,
-        args.period,
+        period,
     )
+
+    from src.quality.validate_silver import validate_silver
+    validate_silver(df, period)
 
     save_silver(
         df,
         output_file,
     )
 
-    if args.upload_silver:
+    if upload:
         upload_silver(
             output_file,
-            args.period,
+            period,
         )
 
     print()
@@ -408,6 +405,11 @@ def main():
 
     print(f"Registros: {len(df):,}")
     print(f"Colunas:   {len(df.columns)}")
+
+
+def main():
+    args = get_arguments()
+    run(args.period, args.source, args.upload_silver)
 
 
 if __name__ == "__main__":
