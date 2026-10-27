@@ -7,7 +7,7 @@ SELECT COUNT(*) AS reclamacoes,
                COUNT(f.tempo_resposta) AS base_tempo,
                ROUND(AVG(f.nota_do_consumidor), 2) AS nota_media,
                COUNT(f.nota_do_consumidor) AS base_nota
-        
+
     FROM warehouse.fato_reclamacao f
     JOIN warehouse.dim_tempo t ON t.data_id = f.data_id
 

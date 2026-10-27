@@ -229,4 +229,3 @@ BEGIN
     RAISE NOTICE 'Gold validada: % registros no periodo %.',
         v_gold, TO_CHAR(v_periodo, 'YYYY-MM');
 END $$;
-
