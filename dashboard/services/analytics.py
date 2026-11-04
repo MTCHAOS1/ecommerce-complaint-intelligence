@@ -1,9 +1,10 @@
 """Leitura analítica com cache e transação consistente para cada conjunto de gráficos."""
+
 import pandas as pd
 import streamlit as st
 from sqlalchemy import text
 
-from src.database.connection import get_engine
+from src.database.connection import get_dashboard_engine as get_engine
 
 
 BANCO_ESPERADO = "ecommerce_complaints"

@@ -20,13 +20,11 @@ fi
 cd "$PROJECT_DIR"
 
 echo "============================================================"
-echo "Iniciando backfill: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "Iniciando atualização Bronze -> Gold: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "============================================================"
 
-"$PYTHON" -m src.ingestion.backfill \
-    --year 2026 \
-    --start-month 5 \
-    --end-month 6 \
-    --delay 5
+# Sem argumentos: três últimos meses encerrados, Bronze até Gold.
+# Argumentos explícitos são encaminhados à CLI (incluindo --plan).
+"$PYTHON" -m src.ingestion.refresh "$@"
 
-echo "Backfill finalizado: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "Atualização finalizada: $(date '+%Y-%m-%d %H:%M:%S')"

@@ -582,7 +582,93 @@ O relatório local `data/diagnostics/load_2026_05_06_report.json` registra a
 comparação anterior/posterior da carga. Consulte a seção 9 para conferir as
 contagens atuais. Os downloads originais e esse relatório não são versionados.
 
-## 7. Cron: execução agendada do backfill
+## 7. Cron: atualização recorrente Bronze → Gold
+
+Desde 04/11/2026, `scripts/run_backfill.sh` chama `src.ingestion.refresh` e
+**executa a pipeline completa**, incluindo a substituição mensal dos fatos na
+Gold quando necessária. Não está mais limitado a maio/junho nem à Bronze.
+O nome do wrapper e seu `flock` foram preservados para compatibilidade com o
+agendamento existente. Este desenvolvimento não instalou nem alterou crontab.
+
+Validação local em 04/11/2026: **184 testes aprovados, 63 pulados e 5 subtestes**
+na suíte padrão; **247 aprovados, nenhum pulado e 5 subtestes** com PostgreSQL
+18.6 descartável. Os testes incluem retomada, última auditoria/contagens reais,
+falhas parciais, planejamento sem conexão e disputa do lock entre processos.
+Sintaxe Bash, compilação Python e `git diff --check` também passaram.
+
+CI hospedado confirmado para o commit remoto `42d6ca3`: jobs Python/dashboard,
+PostgreSQL 15 e PostgreSQL 18 concluídos com sucesso na
+[execução 40542187276](https://github.com/MTCHAOS1/ecommerce-complaint-intelligence/actions/runs/40542187276).
+Essa confirmação não cobre as alterações locais posteriores. Para consultar:
+
+```bash
+gh run view 40542187276
+```
+
+Reproduzir a suíte completa com bancos descartáveis:
+
+```bash
+RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest -q --junitxml=/tmp/eci-project-assessment.xml
+```
+
+Inspecionar os três últimos meses encerrados, sem conectar aos serviços:
+
+```bash
+python -m src.ingestion.refresh --plan
+```
+
+Executar a janela padrão (requer PostgreSQL, MinIO e buckets inicializados):
+
+```bash
+python -m src.ingestion.refresh
+```
+
+Selecionar um intervalo de meses encerrados, inclusive entre anos:
+
+```bash
+python -m src.ingestion.refresh --start 2026-08 --end 2026-10
+```
+
+Ampliar a janela para doze meses, recuperando publicações atrasadas:
+
+```bash
+python -m src.ingestion.refresh --lookback 12
+```
+
+Recarregar explicitamente um mês, mesmo com auditoria de sucesso:
+
+```bash
+python -m src.ingestion.refresh --start 2026-09 --end 2026-09 --reprocess
+```
+
+Os comandos sem `--plan` podem alterar Bronze, Silver, Staging, Gold e metadados.
+`--start` e `--end` devem ser informados juntos; o mês corrente e meses futuros
+são recusados. A janela é de no máximo 120 meses, calculada pelo calendário
+local da máquina. `--delay` aceita 0–3600 segundos entre meses que precisam de
+processamento (padrão: 5).
+
+O lock PostgreSQL permanece adquirido durante toda a atualização e é reutilizado
+pelas etapas internas. Cada mês mantém as transações existentes; uma falha não
+desfaz meses anteriores já concluídos. Em falhas de transformação/Staging, a
+Gold desse mês não é chamada; uma falha da Gold conserva sua auditoria existente.
+O resumo indica `SUCCESS`, `SKIPPED`, `PENDING` ou `FAILED` por mês. A saída é 0
+somente quando todos os meses foram concluídos ou dispensados; caso contrário,
+é 1. Uma falha de conexão/lock pode encerrar antes de produzir o resumo completo.
+
+`SKIPPED` exige última auditoria `SUCCESS` e contagens positivas compatíveis com
+os fatos atuais. Não é verificação por checksum nem identifica republicações com
+a mesma contagem. Para essas situações, use `--reprocess`. Meses sem Bronze
+disponível não seguem para Silver/Staging/Gold; a próxima execução tenta novamente.
+O resumo não altera os significados de `metadata.ingestion_control` ou
+`metadata.gold_load_control`. Formatos ZIP especiais ainda exigem a preparação
+descrita na seção 6.1. A janela móvel não recupera meses mais antigos que ela;
+use intervalo explícito ou amplie `--lookback`.
+
+Para continuar executando **apenas a coleta Bronze**, use o comando da seção 6:
+
+```bash
+python -m src.ingestion.backfill --year 2026 --start-month 1 --end-month 9 --delay 5
+```
 
 Verificar e iniciar:
 
@@ -619,10 +705,16 @@ Agendamento anteriormente configurado: a cada seis horas, conforme fuso do WSL.
 
 Executar o script manualmente e consultar log:
 
-**Executar o script de backfill manualmente**
+**Executar a atualização completa pelo wrapper**
 
 ```bash
 ./scripts/run_backfill.sh
+```
+
+O wrapper encaminha argumentos à nova CLI. Inspecionar um intervalo sem carga:
+
+```bash
+./scripts/run_backfill.sh --start 2026-08 --end 2026-10 --plan
 ```
 
 **Consultar as últimas linhas do log do cron**
@@ -728,6 +820,119 @@ FROM metadata.gold_load_control
 GROUP BY status
 ORDER BY status;
 ```
+
+### 10.1 Diagnóstico de cobertura e auditoria
+
+Conferir contagens e a última auditoria de cada mês esperado, somente em leitura:
+
+```bash
+python -m src.monitoring.gold_health --start 2026-01 --end 2026-09
+```
+
+Emitir JSON e sinalizar alertas pelo código de retorno:
+
+```bash
+python -m src.monitoring.gold_health --start 2026-01 --end 2026-09 --json --check
+```
+
+Personalizar o tempo que caracteriza uma execução prolongada:
+
+```bash
+python -m src.monitoring.gold_health --start 2026-01 --end 2026-09 --timeout-minutes 120 --check
+```
+
+`--start` e `--end` são obrigatórios; aceitam até 120 meses encerrados, inclusive
+entre anos. O intervalo deve refletir a cobertura esperada pelo operador. Mês
+ausente na Gold não comprova publicação na fonte; não há consulta à API/MinIO.
+O comando requer SELECT em `warehouse.fato_reclamacao`, `warehouse.dim_tempo`
+e `metadata.gold_load_control`. O leitor exclusivo do dashboard não recebe
+automaticamente acesso aos metadados: execute com uma conta operacional adequada.
+
+O relatório inclui todos os meses, contagens atuais, última auditoria, contagens
+auditadas, último mês com fatos e última carga `SUCCESS` no intervalo. Datas JSON
+usam ISO 8601; ausência de informação usa `null`. `verificado_em` identifica o
+início do snapshot PostgreSQL; ele não é a data de atualização dos arquivos da
+fonte. A última carga `SUCCESS` também não garante que o último mês foi publicado.
+
+| Alerta | Significado |
+| --- | --- |
+| `SEM_DADOS` | Nenhum fato para um mês do intervalo solicitado. |
+| `SEM_AUDITORIA` | Nenhum registro de carga Gold para o mês, mesmo que existam fatos. |
+| `ULTIMA_CARGA_FALHOU` | A tentativa com maior `execution_id` está `FAILED`; fatos anteriores podem continuar disponíveis. |
+| `CONTAGEM_DIVERGENTE` | A última tentativa é `SUCCESS`, mas alguma contagem auditada é nula ou difere da Gold atual. |
+| `EXECUCAO_PROLONGADA` | Registro `RUNNING` no intervalo supera o tempo limite; inclui tentativas antigas mesmo se houver sucesso posterior. |
+
+Sem `--check`, um relatório com alertas retorna 0. Com `--check`, retorna 1 se
+houver alertas e 0 caso contrário. Falhas de consulta/configuração e argumentos
+inválidos retornam 2; falhas de consulta são reportadas sem credenciais no erro.
+Um `RUNNING` recente aparece na situação mensal, sem ser considerado falha por
+duração. Uma execução prolongada não comprova interrupção do processo.
+
+As consultas compartilham uma transação `REPEATABLE READ, READ ONLY`, com timeout
+de 60 segundos por instrução e espera máxima de lock de 3 segundos. O diagnóstico
+não adquire o Advisory Lock da carga, não altera status e não reprocessa dados.
+Contagens iguais não comprovam igualdade de conteúdo ou integridade referencial.
+
+Conferência inicial de 04/11/2026: agosto tinha **394.120 fatos** sem auditoria;
+o diagnóstico retornou `SEM_AUDITORIA`, sem modificar dados. Após o reprocessamento
+descrito na seção 10.2, janeiro a setembro mantêm **3.198.882 fatos**, todas as
+últimas auditorias são `SUCCESS`, com contagens compatíveis, e não há alertas.
+`--check` agora retorna 0. A carga `SUCCESS` mais recente terminou em 04/11/2026.
+
+Validar o diagnóstico em banco descartável:
+
+```bash
+RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest tests/test_gold_health.py -q
+```
+
+Validação desta entrega: **264 testes e 5 subtestes aprovados**, nenhum pulado,
+na suíte completa com PostgreSQL 18.6 descartável. Cobertura de meses ausentes,
+fatos sem auditoria, falha posterior a sucesso, contagens divergentes, execuções
+antigas/recentes, recorte mensal, bloqueio de escrita, saída JSON e códigos de
+retorno. Compilação Python e `git diff --check` aprovados.
+
+### 10.2 Reprocessamento auditado de agosto/2026 — 04/11/2026
+
+Agosto foi reprocessado a partir de `data/raw/finalizadas_2026-08.zip`, usando
+as rotinas existentes de transformação, Staging transacional e carga Gold auditada,
+sob um único Advisory Lock. Não foi necessário consultar a fonte pública nem
+alterar objetos do MinIO. A Silver local foi regenerada e a Staging passou a
+conter agosto, com **394.120 registros**.
+
+A primeira preparação identificou diferenças em IDs dimensionais e interrompeu
+antes da carga Gold. A investigação encontrou espaços extras em nomes de empresas
+e classificações da carga antiga. A execução seguinte exigiu igualdade completa
+dos **19 campos de negócio**, aplicando `BTRIM` aos textos antigos e comparando
+com `EXCEPT ALL`, para preservar a quantidade de ocorrências de cada registro.
+Essa checagem passou antes da carga e novamente depois dela.
+
+Resultado: **execução 66 / SUCCESS**, com **394.120 fatos** na Gold e duração da
+etapa Gold de aproximadamente **352 segundos**. A auditoria registra a execução
+real de 04/11/2026; não foi retrodatada. Novos IDs substitutos de fatos e eventuais
+chaves dimensionais normalizadas são esperados no reprocessamento.
+
+Verificações posteriores:
+
+- Agosto mantém os mesmos registros de negócio após normalização, incluindo duplicidades.
+- Os demais meses preservaram contagens, soma de IDs, somas/bases de tempos e notas e assinatura agregada de todas as colunas dos fatos.
+- Zero fatos órfãos; total Gold mantido em **3.198.882**.
+- Diagnóstico de janeiro a setembro sem alertas e com todas as últimas auditorias `SUCCESS`.
+
+Evidência local não versionada:
+`data/diagnostics/reload_august_audit_20261104T102111Z.json`, com SHA-256 da Bronze
+e da Silver, auditoria, comparações e diagnóstico final. O relatório anterior
+`reload_august_audit_20261104T101524Z.json` registra a preparação interrompida;
+ela não iniciou carga Gold nem criou auditoria de execução.
+
+Conferir o resultado, somente em leitura:
+
+```bash
+python -m src.monitoring.gold_health --start 2026-01 --end 2026-09 --check
+```
+
+O comando retorna 0 no estado validado. Referências anteriores neste manual à
+Staging contendo junho descrevem o estado histórico da carga de maio/junho;
+a Staging atual contém agosto/2026.
 
 ## 11. Recuperação administrativa de execuções interrompidas
 
@@ -1090,7 +1295,7 @@ O dashboard consulta a Gold em modo somente leitura. Na visão geral, selecione
 é **3.198.882 reclamações**. A conferência com os nove Parquets também validou
 **1.812 nomes de empresas**, **27 UFs**, tempo médio **6,23** e nota média **2,38**.
 Os rankings, a distribuição por UF e a evolução mensal coincidiram com a Silver.
-As quatro páginas especializadas continuam provisórias.
+As cinco páginas foram implementadas em 28/10/2026 (detalhes e comandos ao final).
 
 ### Definições dos indicadores e filtros
 
@@ -1416,3 +1621,341 @@ continuam pendentes, fora dessa sequência.
 ---
 
 **Última atualização: 27/10/2026.** Etapa 7 concluída: benchmark reproduzível, otimização dos KPIs validada e sete etapas encerradas localmente. A execução hospedada do CI deve ser confirmada na aba Actions.
+
+
+## Entrega de 28/10/2026 — Empresas e usuário analítico
+
+A página **Empresas** agora permite selecionar ano, meses carregados e nome
+fantasia. Os detalhes agrupam segmentos do mesmo nome após remover espaços
+externos. Exibe volume, médias com bases, evolução mensal e até 10 problemas
+em painel com barras horizontais, textos completos, contagens e rolagem.
+Meses sem carga não são oferecidos; meses sem registros da empresa não recebem
+barras de zero. Geografia, Problemas e Atendimento também estão implementadas; veja a entrega complementar ao final.
+
+**Iniciar o dashboard**
+
+```bash
+.venv/bin/python -m streamlit run dashboard/app.py
+```
+
+Na navegação, escolha **Empresas**. Os filtros temporais são independentes dos
+filtros da visão geral. **Atualizar dados** limpa o cache analítico compartilhado
+(dez minutos). Volumes não representam taxas por cliente/venda; médias usam
+somente valores preenchidos e exibem N/D quando não há base.
+
+### Provisionar login somente leitura
+
+Execute o script uma única vez, como administrador, no banco da aplicação.
+Ele cria `complaints_dashboard`, concede USAGE no schema warehouse e SELECT
+somente nas cinco tabelas analíticas. Não concede privilégios sobre Staging ou
+metadados, nem acesso automático a tabelas futuras. Se o papel já existir, a
+transação falha sem reaplicar permissões. Não execute para modificar um papel
+existente. Este provisionamento ainda não foi aplicado ao ambiente operacional.
+
+```bash
+sudo -u postgres psql -X -v ON_ERROR_STOP=1 -d ecommerce_complaints -f sql/analytics/create_dashboard_reader.sql
+```
+
+Abra uma sessão administrativa para definir a senha sem registrá-la no SQL:
+
+```bash
+sudo -u postgres psql -X -d ecommerce_complaints
+```
+
+No psql, execute:
+
+```text
+\password complaints_dashboard
+```
+
+O login depende também das regras locais de autenticação/conexão PostgreSQL.
+Se CONNECT tiver sido revogado de PUBLIC, conceda-o explicitamente como administrador:
+
+```sql
+GRANT CONNECT ON DATABASE ecommerce_complaints TO complaints_dashboard;
+```
+
+Configure no `.env`, usando a senha escolhida e sem versionar o arquivo:
+
+```dotenv
+DASHBOARD_DB_USER=complaints_dashboard
+DASHBOARD_DB_PASSWORD=substitua_pela_senha_escolhida
+```
+
+Host, porta e banco continuam em `DB_HOST`, `DB_PORT` e `DB_NAME`.
+A pipeline continua usando `DB_USER/DB_PASSWORD`. Sem as duas variáveis novas,
+o dashboard mantém o comportamento legado; uma configuração parcial é recusada.
+Reinicie o Streamlit após mudar as credenciais para limpar o cache da sessão.
+
+**Conferir o acesso com o novo login**
+
+```bash
+psql -X -W -h localhost -U complaints_dashboard -d ecommerce_complaints -c "SELECT current_user, COUNT(*) FROM warehouse.dim_empresa;"
+```
+
+**Conferir privilégios: SELECT deve ser verdadeiro e INSERT falso**
+
+```bash
+psql -X -W -h localhost -U complaints_dashboard -d ecommerce_complaints -c "SELECT has_table_privilege(current_user, 'warehouse.fato_reclamacao', 'SELECT') AS leitura, has_table_privilege(current_user, 'warehouse.fato_reclamacao', 'INSERT') AS escrita;"
+```
+
+### Validar esta entrega
+
+**Suíte sem conexão PostgreSQL**
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= .venv/bin/python -m pytest -q
+```
+
+**Suíte completa com PostgreSQL descartável**
+
+```bash
+RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest -q --junitxml=/tmp/eci-companies-tests.xml
+```
+
+As integrações usam banco descartável. O teste de provisionamento cria e remove
+o papel no servidor de testes; exige permissão CREATEROLE no modo servidor/CI
+(o proprietário do cluster local e o usuário dos serviços CI já a possuem).
+Os testes verificam agrupamento entre segmentos, recorte temporal, parâmetros de
+empresa com caracteres SQL, bases de médias, seleção de empresa na interface,
+seleção vazia, mensagem de falha e permissões do leitor.
+
+Resultado em 28/10/2026: **133 aprovados, 55 pulados e 5 subtestes** na suíte padrão; **188 aprovados, nenhum pulado e 5 subtestes** com PostgreSQL 18.6 descartável. Nenhuma carga no banco principal ou alteração em MinIO.
+
+
+## Entrega complementar de 28/10/2026 — Geografia, Problemas e Atendimento
+
+**Abrir as cinco páginas do dashboard**
+
+```bash
+.venv/bin/python -m streamlit run dashboard/app.py
+```
+
+Na navegação lateral:
+
+- **Geografia:** selecione ano, meses e uma UF ou Todas as UFs. Confira contagens, distribuição por UF, até 15 cidades e evolução mensal. Cidades com o mesmo nome em UFs diferentes são separadas; DF é incluído. Não há normalização por população.
+- **Problemas:** selecione ano, meses e uma área ou Todas as áreas. Os quatro rankings mostram até 15 áreas, assuntos, grupos e problemas. Espaços externos são removidos e nulos/vazios entram em Não informado. Rankings limitados podem não somar o total.
+- **Atendimento:** selecione ano e meses. Confira tempo e nota médios com suas bases, resposta percentual, evolução, indicadores mensais, avaliações e notas preenchidas. Resposta percentual usa somente booleanos informados: verdadeiros / (verdadeiros + falsos). Sem booleanos preenchidos, exibe N/D. Resposta não é resolução. Notas independem do rótulo de avaliação; o tempo mantém a unidade da fonte.
+
+Cada página tem seleção temporal independente. Meses sem carga não são oferecidos;
+seleção vazia interrompe consultas. Recortes sem registros exibem mensagem;
+meses ausentes não recebem barras de zero. **Atualizar dados** limpa o cache de
+dez minutos compartilhado entre páginas. Os detalhes usam snapshot consistente;
+os catálogos de períodos e áreas são consultados separadamente.
+
+**Validar interfaces e navegação sem PostgreSQL**
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= .venv/bin/python -m pytest tests/test_specialized_ui.py tests/test_dashboard_ui.py tests/test_companies_ui.py -q
+```
+
+**Validar consultas reais com dados sintéticos no PostgreSQL descartável**
+
+```bash
+RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest tests/test_dashboard_postgres.py -q
+```
+
+**Executar a suíte completa**
+
+```bash
+RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest -q --junitxml=/tmp/eci-dashboard-pages-tests.xml
+```
+
+As novas consultas não foram medidas na Gold principal. A documentação de
+benchmark da visão geral continua válida apenas para aquelas consultas.
+Nenhum objeto MinIO ou dado do banco principal foi alterado nesta entrega.
+
+Validação da entrega complementar: **142 aprovados, 59 pulados e 5 subtestes** sem integração; **201 aprovados, nenhum pulado e 5 subtestes** com PostgreSQL 18.6 descartável. Compilação e `git diff --check` aprovados.
+
+
+## Melhorias visuais de 28/10/2026 — mapa e gráficos
+
+**Abrir o dashboard**
+
+```bash
+.venv/bin/python -m streamlit run dashboard/app.py
+```
+
+Em **Geografia**, o mapa substitui as barras por UF. Cor mais escura significa
+maior volume absoluto; passe o cursor para ver valor e percentual do recorte.
+Cinza significa UF sem registros ou fora do filtro, sem atribuir zero observado.
+O filtro de UF continua no seletor; clique no mapa não altera filtros. Use zoom
+para explorar o DF. Expanda **Comparar valores exatos por UF** para conferir a
+ordenação numérica. O enquadramento mantém as 27 UFs como contexto.
+
+A malha simplificada é do IBGE e está incluída em
+`dashboard/assets/br_ufs.geojson`. Não há token ou tiles externos durante o uso.
+Origem e procedimento de atualização: `dashboard/assets/README.md`.
+A cor representa volume, sem normalização por população, vendas ou clientes.
+
+Os rankings agora exibem valores nas barras, com altura proporcional às
+categorias; rótulos longos são abreviados no eixo e completos no hover. Na visão
+geral, as UFs também passam a barras horizontais ordenadas. Em **Atendimento**,
+as notas preenchidas são mostradas em barras na ordem 1–5. Zero em uma categoria
+de nota é ausência daquela nota no recorte; nenhuma nota preenchida produz
+mensagem, sem distribuição artificial. Médias/bases continuam na tabela mensal.
+Evoluções mensais permanecem em colunas, inclusive para seleções descontínuas.
+
+**Validar as figuras e as interações sem banco**
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= .venv/bin/python -m pytest tests/test_dashboard_charts.py tests/test_specialized_ui.py tests/test_dashboard_ui.py tests/test_companies_ui.py -q
+```
+
+**Executar a suíte completa em PostgreSQL descartável**
+
+```bash
+RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest -q --junitxml=/tmp/eci-dashboard-map-tests.xml
+```
+
+Resultados: **150 aprovados, 59 pulados e 5 subtestes** na suíte padrão;
+**209 aprovados, nenhum pulado e 5 subtestes** com PostgreSQL 18.6 descartável.
+O endpoint de saúde do dashboard em execução respondeu `ok`. As figuras foram
+validadas por testes de dados e Streamlit AppTest; não houve inspeção automatizada
+em navegador. Nenhum dado da aplicação/MinIO ou fórmula foi alterado.
+
+
+## Evolução mensal em destaque e Geografia com mapa/barras — 28/10/2026
+
+Esta atualização substitui a apresentação mensal em colunas descrita anteriormente.
+
+**Abrir o dashboard**
+
+```bash
+.venv/bin/python -m streamlit run dashboard/app.py
+```
+
+Em **Visão Geral**, **Empresas**, **Geografia** e **Atendimento**, a evolução
+mensal agora é o primeiro bloco analítico, com linha, pontos e valores visíveis.
+Os destaques mostram o último mês com valor, variação ante o mês anterior e
+maior valor observado. A ordem permanece cronológica. Lacunas não são conectadas
+nem viram zero. Só há comparação com o mês anterior do calendário quando ambos
+possuem valores no recorte; valor anterior zero gera N/D na variação percentual.
+
+Em **Atendimento**, alterne **Indicador mensal** entre reclamações, tempo médio,
+nota média e respondidas (%). As escalas são independentes, uma por vez. Passe
+o cursor para ver a base da média/taxa. Variação de nota é em pontos e de
+respondidas em pontos percentuais. Volume e tempo usam variação percentual.
+Sem base para o indicador escolhido, aparece mensagem em vez de valores
+fabricados. Expanda **Detalhes mensais — médias e bases** para a tabela completa.
+
+Em **Geografia**, **Comparação por UF** tem abas **Mapa** e **Barras**, ambas
+usando o mesmo recorte. O mapa abre com centro no Brasil e zoom 3,2, sem depender
+do enquadramento automático. Ajuste zoom em telas menores ou para explorar DF.
+A tabela expansível de valores exatos e o ranking de cidades continuam disponíveis.
+A evolução mensal aparece antes da comparação territorial e do resumo agregado.
+
+**Validar séries mensais, mapa e interações**
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= .venv/bin/python -m pytest tests/test_monthly_charts.py tests/test_dashboard_charts.py tests/test_specialized_ui.py tests/test_dashboard_ui.py tests/test_companies_ui.py -q
+```
+
+**Validar a suíte completa em PostgreSQL descartável**
+
+```bash
+RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest -q --junitxml=/tmp/eci-monthly-dashboard-tests.xml
+```
+
+Resultados: **156 aprovados, 59 pulados e 5 subtestes** na suíte padrão;
+**215 aprovados, nenhum pulado e 5 subtestes** com PostgreSQL 18.6 descartável.
+Compilação e diff aprovados. Figuras e interações verificadas com Streamlit
+AppTest; sem inspeção automatizada em navegador. Nenhuma consulta ou fórmula
+foi alterada, nem houve carga no PostgreSQL principal ou alteração em MinIO.
+
+
+## Assuntos completos e ícone de carregamento — 28/10/2026
+
+**Abrir o dashboard**
+
+```bash
+.venv/bin/python -m streamlit run dashboard/app.py
+```
+
+Em **Problemas**, os rankings agora mostram o nome completo acima da barra e a
+contagem ao lado. Áreas, assuntos, grupos e problemas usam quebra automática de
+linha, incluindo palavras longas. Em telas pequenas, os valores passam para a
+linha seguinte. Não é necessário passar o cursor para ler o assunto inteiro.
+As barras são relativas à maior contagem de cada ranking; os limites de até 15
+categorias, filtros e totais continuam iguais.
+
+O ícone de execução perto de Deploy agora é um gráfico com lupa animado.
+Para conferir, use **Atualizar dados** e observe o ícone enquanto as consultas
+executam. O botão Stop continua disponível; a animação respeita a preferência
+Movimento reduzido do sistema/navegador. Em respostas rápidas, o indicador pode
+nem aparecer devido ao atraso nativo de exibição do Streamlit.
+
+A apresentação está em `dashboard/components/presentation.py`. Não houve
+alteração em arquivos da biblioteca Streamlit. O CSS usa
+`[data-testid="stStatusWidgetRunningIcon"]`, verificado no Streamlit 1.66.1;
+revalidar o seletor ao atualizar a dependência. Na primeira conexão, o ícone
+nativo pode aparecer brevemente antes de chegar o CSS da aplicação.
+
+**Validar rótulos completos e integração com a página**
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= .venv/bin/python -m pytest tests/test_dashboard_presentation.py tests/test_specialized_ui.py -q
+```
+
+**Validar toda a suíte com PostgreSQL descartável**
+
+```bash
+RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest -q --junitxml=/tmp/eci-problem-labels-tests.xml
+```
+
+Resultados: **161 aprovados, 59 pulados e 5 subtestes** sem integração;
+**220 aprovados, nenhum pulado e 5 subtestes** em PostgreSQL 18.6 descartável.
+Compilação e diff aprovados. Testes de conteúdo e Streamlit AppTest aprovados;
+sem inspeção automatizada em navegador. Nenhuma carga ou alteração de dados da
+aplicação/MinIO foi executada.
+
+
+## Revisão dos gráficos das cinco páginas — 28/10/2026
+
+**Iniciar o dashboard**
+
+```bash
+.venv/bin/python -m streamlit run dashboard/app.py
+```
+
+- **Visão Geral:** no bloco Evolução mensal, alterne **Formato do volume mensal** entre Linha e Colunas. Meses ausentes continuam como lacunas; zeros observados são preservados.
+- **Empresas:** escolha a empresa de detalhamento e use **Comparar até três empresas** para as linhas mensais. Em **Comparar por**, selecione Volume ou Participação no mês. A participação divide pelo total da Gold naquele mês, incluindo todas as empresas/setores; não apenas as selecionadas. A seleção comparativa é independente do detalhamento. Sem empresas selecionadas, aparece orientação, mantendo os detalhes da empresa escolhida. **Principais problemas** mostra os 10 maiores volumes em um painel com rolagem e cabeçalho fixo. Cada linha apresenta a classificação do problema, uma barra horizontal abaixo e a coluna Quantidade de reclamações à direita. Essa quantidade conta os registros daquela classificação para a empresa e o período selecionados; não é a posição no ranking. A soma pode ser menor que o total da empresa porque a lista inclui somente as 10 classificações com mais registros. As barras usam a mesma escala, relativa ao maior volume da lista; não representam participação no total. Role verticalmente para ler todos os itens e horizontalmente em telas estreitas. O limite também é aplicado na consulta SQL; os indicadores gerais continuam considerando todos os problemas.
+- **Geografia:** a primeira aba em Comparação por UF é **Barras**. A aba **Mapa** preenche o território de cada UF com uma escala linear de azul: maior volume absoluto significa azul mais escuro. A legenda e a escala são recalculadas para o recorte, partindo de zero. UFs sem registros ou fora do filtro ficam cinza, sem atribuir zero observado. Hover e tabela preservam valores exatos; o centro/zoom continuam no Brasil. Use zoom para inspecionar o DF. O mapa não representa taxa por população.
+- **Problemas:** refine por Área, Assunto e Grupo de problemas. Os catálogos respeitam os filtros anteriores e limpam seleções indisponíveis. Use **Ranking principal** para escolher Áreas, Assuntos, Grupos de problemas ou Problemas. Apenas um ranking é exibido por vez, com até 15 categorias, texto completo e contagens. A barra é relativa à maior contagem desse ranking.
+- **Atendimento:** abaixo do volume mensal, tempo médio, nota média e percentual de respostas aparecem simultaneamente em três gráficos alinhados, com escalas próprias. Passe o cursor para valores, variações e bases. Sem base, aparece mensagem no espaço do indicador. A tabela completa permanece em Detalhes mensais — médias e bases. O seletor anterior de indicador mensal foi substituído por essa apresentação simultânea.
+
+Atualização visual validada em 04/11/2026: tabela de até 10 problemas com textos
+completos e rolagem, e mapa por intensidade de preenchimento. **249 testes e
+5 subtestes aprovados**, sem pulados, com PostgreSQL descartável. Interface
+verificada via AppTest e figuras Plotly; sem inspeção em navegador automatizado.
+Nenhuma carga no banco principal ou MinIO foi necessária. Atualize a página do
+dashboard em execução para visualizar as mudanças.
+
+Participação de reclamações não representa taxa por cliente/venda nem participação
+de mercado. Resposta não implica resolução. Os catálogos são consultas separadas;
+os detalhes e o cálculo de participação usam snapshot consistente e somente leitura.
+As consultas novas ainda não têm benchmark no volume principal.
+
+**Validar as figuras e interações sem banco**
+
+```bash
+env TEST_DB_NAME= RUN_TEMP_POSTGRES_TESTS= .venv/bin/python -m pytest tests/test_dashboard_charts.py tests/test_monthly_charts.py tests/test_companies_ui.py tests/test_specialized_ui.py tests/test_dashboard_ui.py -q
+```
+
+**Validar os cálculos SQL com PostgreSQL descartável**
+
+```bash
+RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest tests/test_dashboard_postgres.py -q
+```
+
+**Executar a suíte completa**
+
+```bash
+RUN_TEMP_POSTGRES_TESTS=1 .venv/bin/python -m pytest -q --junitxml=/tmp/eci-chart-review-tests.xml
+```
+
+Resultados desta entrega: **167 aprovados, 61 pulados e 5 subtestes** sem
+integração; **228 aprovados, nenhum pulado e 5 subtestes** com PostgreSQL 18.6
+descartável. Compilação e diff aprovados. Validação via figuras e AppTest,
+sem inspeção automatizada em navegador. Nenhum dado do warehouse ou MinIO foi
+alterado nesta entrega.

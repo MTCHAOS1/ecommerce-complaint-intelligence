@@ -26,3 +26,18 @@ def get_engine():
     )
 
     return engine
+
+
+def get_dashboard_engine():
+    """Credenciais analíticas independentes; configuração parcial é recusada."""
+    user = os.getenv('DASHBOARD_DB_USER')
+    password = os.getenv('DASHBOARD_DB_PASSWORD')
+    if user is None and password is None:
+        return get_engine()
+    if not user or not password:
+        raise ValueError('Configure DASHBOARD_DB_USER e DASHBOARD_DB_PASSWORD juntos.')
+    return create_engine(URL.create(
+        drivername='postgresql+psycopg', username=user, password=password,
+        host=os.getenv('DB_HOST'), port=int(os.getenv('DB_PORT', '5432')),
+        database=os.getenv('DB_NAME'),
+    ), pool_pre_ping=True)

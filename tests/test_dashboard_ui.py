@@ -43,6 +43,7 @@ def test_month_filter_changes_kpis_and_monthly_chart(dashboard):
     app, provider = dashboard
     app.run()
     assert not app.exception
+    assert app.subheader[0].value == 'Evolução mensal'
     assert app.metric[0].value == '7'
     assert app.multiselect[0].options == ['Janeiro', 'Março']
     app.multiselect[0].set_value([3]).run()
@@ -100,15 +101,17 @@ def test_query_failure_is_handled_without_exposing_details(dashboard):
     assert not app.metric
 
 
-def test_other_pages_remain_accessible_without_overview_filters(dashboard):
+def test_other_pages_remain_accessible_without_overview_queries(dashboard, monkeypatch):
+    from dashboard.components import analysis_page
+    monkeypatch.setattr(analysis_page, "periodos_disponiveis", lambda: pd.DataFrame())
     app, provider = dashboard
     app.run()
     provider.reset_mock()
-    app.radio[0].set_value('Empresas').run()
+    app.radio(key='dashboard_navigation').set_value('Geografia').run()
     assert not app.exception
     assert not app.multiselect
     provider.assert_not_called()
-    assert any(header.value == 'Empresas' for header in app.header)
+    assert any(header.value == 'Geografia' for header in app.header)
 
 
 def test_zero_time_is_displayed_as_zero_not_missing(dashboard):

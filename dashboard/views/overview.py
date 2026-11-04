@@ -1,19 +1,14 @@
 """Visão geral: definições explícitas e um recorte para todos os gráficos."""
-import pandas as pd
-import plotly.express as px
+
 import streamlit as st
 
+from dashboard.components.charts import ranking
 from dashboard.components.filters import meses_carregados, render_filters
+from dashboard.components.formatting import inteiro, media
+from dashboard.components.monthly import evolucao
+from dashboard.constants import MESES
 from dashboard.services.analytics import consultar_lote, periodos_disponiveis
-from dashboard.services.overview import MESES, carregar_visao_geral
-
-
-def inteiro(value):
-    return f'{int(value):,}'.replace(',', '.')
-
-
-def media(value):
-    return f'{float(value):.2f}'.replace('.', ',') if pd.notna(value) else 'N/D'
+from dashboard.services.overview import carregar_visao_geral
 
 
 def render():
@@ -46,7 +41,9 @@ def render():
         st.error('Não foi possível carregar os indicadores. Verifique a conexão com o banco e tente novamente.')
         return
     indicadores = dados['indicadores'].iloc[0]
-    st.subheader('Visão geral')
+    if indicadores['reclamacoes']:
+        evolucao(dados['mensal'], meses, 'overview')
+    st.subheader('Resumo do recorte')
     col1, col2, col3 = st.columns(3)
     col1.metric('Reclamações', inteiro(indicadores['reclamacoes']), help='Quantidade de registros na Gold para as datas de finalização selecionadas.')
     col2.metric('Empresas (nome fantasia)', inteiro(indicadores['empresas']), help='Nomes fantasia distintos após remover espaços nas extremidades, agrupando segmentos do mesmo nome. É a mesma definição usada no ranking; não é uma contagem de CNPJs.')
@@ -64,31 +61,15 @@ def render():
         return
 
     st.divider()
-    mensal = dados['mensal'].copy()
-    mensal['nome_mes'] = mensal['mes'].map(MESES)
-    st.subheader('Evolução mensal — meses selecionados')
-    fig = px.bar(mensal, x='nome_mes', y='reclamacoes',
-                 category_orders={'nome_mes': [MESES[mes] for mes in meses]},
-                 labels={'nome_mes': 'Mês de finalização', 'reclamacoes': 'Reclamações'})
-    st.plotly_chart(fig, width='stretch')
-
     col_esq, col_dir = st.columns(2)
     with col_esq:
         st.subheader('Nomes de empresas com mais reclamações — até 15')
-        empresas = dados['empresas'].sort_values(['reclamacoes', 'empresa'], ascending=[True, False])
-        fig = px.bar(empresas, x='reclamacoes', y='empresa', orientation='h',
-                     labels={'empresa': 'Nome fantasia', 'reclamacoes': 'Reclamações'})
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(ranking(dados['empresas'], 'empresa', 'Nome fantasia'), width='stretch')
     with col_dir:
         st.subheader('Reclamações por UF')
-        fig = px.bar(dados['estados'], x='uf', y='reclamacoes',
-                     labels={'uf': 'UF', 'reclamacoes': 'Reclamações'})
-        st.plotly_chart(fig, width='stretch')
+        st.plotly_chart(ranking(dados['estados'], 'uf', 'UF'), width='stretch')
     st.subheader('Principais áreas de reclamação — até 15')
-    areas = dados['areas'].sort_values(['reclamacoes', 'area'], ascending=[True, False])
-    fig = px.bar(areas, x='reclamacoes', y='area', orientation='h',
-                 labels={'area': 'Área', 'reclamacoes': 'Reclamações'})
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(ranking(dados['areas'], 'area', 'Área'), width='stretch')
     st.caption('Os rankings mostram volumes de registros no recorte; não medem taxa de reclamação por cliente ou venda.')
     st.divider()
     st.caption('Fonte: Consumidor.gov.br | Data de finalização | Consultas somente leitura | Cache: 10 minutos')

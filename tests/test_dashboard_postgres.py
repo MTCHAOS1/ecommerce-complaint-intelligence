@@ -52,6 +52,61 @@ def test_company_count_and_ranking_share_name_definition(dashboard_database):
     assert data['areas'].set_index('area')['reclamacoes'].to_dict() == {'Financeiro': 2, 'Não informado': 2}
 
 
+def test_company_detail_groups_segments_and_filters_months(dashboard_database):
+    from dashboard.services.companies import carregar_empresa, listar_empresas
+    assert listar_empresas(2026, [7])['empresa'].tolist() == ['Empresa', 'Outra']
+    result = carregar_empresa(2026, [7], ' Empresa ')
+    kpis = result['indicadores'].iloc[0]
+    assert kpis['reclamacoes'] == 2
+    assert kpis['tempo_medio'] == 10
+    assert kpis['base_tempo'] == 1
+    assert kpis['nota_media'] == 1
+    assert kpis['base_nota'] == 1
+    assert result['mensal']['mes'].tolist() == [7]
+    assert result['problemas'].iloc[0]['problema'] == 'Não informado'
+    assert result['problemas']['reclamacoes'].sum() == 2
+    assert carregar_empresa(2026, [8], 'Empresa')['indicadores'].iloc[0]['reclamacoes'] == 1
+    assert carregar_empresa(2026, [7], "Empresa' OR TRUE --")['indicadores'].iloc[0]['reclamacoes'] == 0
+
+
+def test_company_problems_returns_only_ten_largest_categories(dashboard_database):
+    from dashboard.services.companies import carregar_empresa
+    dashboard_database("""
+        TRUNCATE staging.complaints;
+        INSERT INTO staging.complaints
+            (data_finalizacao, nome_fantasia, uf, cidade, problema)
+        SELECT '2026-07-01'::date, 'Empresa', 'SP', 'São Paulo',
+               'Problema ' || LPAD(category::text, 2, '0')
+        FROM generate_series(1, 12) AS category
+        CROSS JOIN LATERAL generate_series(1, category) AS occurrence;
+    """)
+    result = dashboard_database.load('2026-07')
+    assert result.returncode == 0, result.stderr
+    data = carregar_empresa(2026, [7], 'Empresa')
+    assert data['problemas']['problema'].tolist() == [
+        f'Problema {category:02d}' for category in range(12, 2, -1)
+    ]
+    assert data['problemas']['reclamacoes'].tolist() == list(range(12, 2, -1))
+    assert data['indicadores'].iloc[0]['reclamacoes'] == sum(range(1, 13))
+
+
+def test_dashboard_reader_has_select_without_write_privileges(dashboard_database):
+    from pathlib import Path
+    script = (Path(__file__).resolve().parents[1] / 'sql/analytics/create_dashboard_reader.sql').read_text()
+    dashboard_database(script)
+    try:
+        result = dashboard_database("""
+            SELECT has_table_privilege('complaints_dashboard', 'warehouse.fato_reclamacao', 'SELECT'),
+                   has_table_privilege('complaints_dashboard', 'warehouse.fato_reclamacao', 'INSERT'),
+                   has_table_privilege('complaints_dashboard', 'warehouse.fato_reclamacao', 'UPDATE'),
+                   has_table_privilege('complaints_dashboard', 'warehouse.fato_reclamacao', 'DELETE'),
+                   has_schema_privilege('complaints_dashboard', 'warehouse', 'CREATE');
+        """)
+        assert result.strip() == 't|f|f|f|f'
+    finally:
+        dashboard_database('DROP OWNED BY complaints_dashboard; DROP ROLE complaints_dashboard;')
+
+
 def test_means_exclude_nulls_and_report_denominators(dashboard_database):
     kpis = overview.carregar_visao_geral(2026, [7])['indicadores'].iloc[0]
     assert kpis['tempo_medio'] == 15
@@ -154,3 +209,100 @@ def test_optimized_kpis_match_reference_with_unequal_groups(dashboard_database):
                     assert current['base_nota'] == 6
     finally:
         engine.dispose()
+
+
+def test_geography_filters_uf_and_distinguishes_cities(dashboard_database):
+    from dashboard.services.specialized import carregar_geografia
+    data = carregar_geografia(2026, [7])
+    assert data['indicadores'].iloc[0].to_dict() == {'reclamacoes': 4, 'ufs': 3, 'cidades': 3}
+    assert data['estados'].set_index('uf')['reclamacoes'].to_dict() == {'SP': 2, 'DF': 1, 'RJ': 1}
+    assert 'Brasília / DF' in data['cidades']['cidade'].tolist()
+    selected = carregar_geografia(2026, [8], 'SP')
+    assert selected['mensal']['mes'].tolist() == [8]
+    assert selected['indicadores'].iloc[0]['reclamacoes'] == 1
+    assert carregar_geografia(2026, [7], 'AC')['cidades'].empty
+    dashboard_database("UPDATE warehouse.dim_localidade SET cidade='São Paulo' WHERE uf='RJ'")
+    assert carregar_geografia(2026, [7, 8])['indicadores'].iloc[0]['cidades'] == 3
+
+
+def test_problem_area_filter_and_missing_categories(dashboard_database):
+    from dashboard.services.specialized import carregar_problemas, listar_areas
+    assert listar_areas(2026, [7])['area'].tolist() == ['Financeiro', 'Não informado']
+    data = carregar_problemas(2026, [7], ' Financeiro ')
+    assert data['indicadores'].iloc[0]['reclamacoes'] == 2
+    for name in ('areas', 'assuntos', 'grupos', 'problemas'):
+        assert data[name]['reclamacoes'].sum() == 2
+    assert data['assuntos'].iloc[0]['assuntos'] == 'Não informado'
+    assert carregar_problemas(2026, [7], 'Não informado')['indicadores'].iloc[0]['reclamacoes'] == 2
+    assert carregar_problemas(2026, [8], 'Financeiro')['indicadores'].iloc[0]['reclamacoes'] == 0
+    assert carregar_problemas(2026, [7], "' OR TRUE --")['indicadores'].iloc[0]['reclamacoes'] == 0
+
+
+def test_service_response_denominator_excludes_unknown(dashboard_database):
+    from dashboard.services.specialized import carregar_atendimento
+    dashboard_database("UPDATE warehouse.fato_reclamacao SET respondida=CASE data_id WHEN 20260701 THEN TRUE WHEN 20260702 THEN FALSE ELSE NULL END")
+    data = carregar_atendimento(2026, [7])
+    kpis = data['indicadores'].iloc[0]
+    assert kpis['reclamacoes'] == 4
+    assert kpis['respondidas'] == 1
+    assert kpis['base_respondida'] == 2
+    assert kpis['percentual_respondidas'] == 50
+    assert kpis['base_nota'] == 3
+    assert kpis['nota_media'] == pytest.approx(3.33)
+    assert data['notas']['reclamacoes'].sum() == 3
+    assert data['avaliacoes']['reclamacoes'].sum() == 4
+    assert data['mensal']['mes'].tolist() == [7]
+    assert data['mensal'].iloc[0]['base_respondida'] == 2
+    unknown = carregar_atendimento(2026, [8])['indicadores'].iloc[0]
+    assert pd.isna(unknown['percentual_respondidas'])
+    assert unknown['base_respondida'] == 0
+    empty = carregar_atendimento(2026, [9])
+    assert empty['indicadores'].iloc[0]['reclamacoes'] == 0
+    assert empty['mensal'].empty
+
+
+def test_problem_ranking_is_limited_and_deterministic(dashboard_database):
+    from dashboard.services.specialized import carregar_problemas
+    dashboard_database("""
+        INSERT INTO warehouse.dim_classificacao (area, assunto, problema)
+        SELECT 'Teste', 'Assunto', 'Problema ' || lpad(i::text, 2, '0') FROM generate_series(1, 20) i;
+        INSERT INTO warehouse.fato_reclamacao (empresa_id, localidade_id, data_id, classificacao_id)
+        SELECT f.empresa_id, f.localidade_id, f.data_id, c.classificacao_id
+        FROM warehouse.fato_reclamacao f CROSS JOIN warehouse.dim_classificacao c
+        WHERE f.data_id=20260701 AND c.area='Teste';
+    """)
+    data = carregar_problemas(2026, [7], 'Teste')
+    assert data['indicadores'].iloc[0]['reclamacoes'] == 20
+    assert data['problemas']['problemas'].tolist() == [f'Problema {i:02}' for i in range(1, 16)]
+
+
+def test_company_comparison_uses_all_companies_in_monthly_denominator(dashboard_database):
+    from dashboard.services.companies import comparar_empresas
+    data = comparar_empresas(2026, [7, 8], [' Empresa ', 'Outra'])
+    july = data[data.mes == 7].set_index('empresa')
+    assert july['reclamacoes'].to_dict() == {'Empresa': 2, 'Outra': 2}
+    assert july['participacao'].to_dict() == {'Empresa': 50, 'Outra': 50}
+    alone = comparar_empresas(2026, [7], ['Empresa']).iloc[0]
+    assert alone['total_mes'] == 4
+    assert alone['participacao'] == 50  # Denominador não é só a seleção.
+    august = data[data.mes == 8].iloc[0]
+    assert august['empresa'] == 'Empresa'
+    assert august['participacao'] == 100
+    assert comparar_empresas(2026, [7], ["' OR TRUE --"]).empty
+
+
+def test_problem_drilldown_filters_subject_and_group(dashboard_database):
+    from dashboard.services.specialized import carregar_problemas, listar_assuntos, listar_grupos
+    dashboard_database("""
+        UPDATE warehouse.dim_classificacao
+        SET assunto=' Cobrança ', grupo_problema=' Valores ', problema='Cobrança indevida'
+        WHERE BTRIM(area)='Financeiro';
+    """)
+    assert listar_assuntos(2026, [7], 'Financeiro')['assunto'].tolist() == ['Cobrança']
+    assert listar_grupos(2026, [7], 'Financeiro', 'Cobrança')['grupo'].tolist() == ['Valores']
+    data = carregar_problemas(2026, [7], 'Financeiro', 'Cobrança', 'Valores', nivel='problemas')
+    assert set(data) == {'indicadores', 'problemas'}
+    assert data['indicadores'].iloc[0]['reclamacoes'] == 2
+    assert data['problemas'].iloc[0]['problemas'] == 'Cobrança indevida'
+    assert carregar_problemas(2026, [7], assunto="' OR TRUE --", nivel='assuntos')['indicadores'].iloc[0]['reclamacoes'] == 0
+    assert listar_assuntos(2026, [8], 'Financeiro').empty

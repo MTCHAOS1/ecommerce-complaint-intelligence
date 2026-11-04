@@ -133,6 +133,7 @@ def operation_database(seeded, monkeypatch):
     ['-m', 'src.transformation.transform_complaints', '2026-07'],
     ['-m', 'src.ingestion.download_complaints', '2026-07'],
     ['-m', 'src.ingestion.backfill', '--year', '2026', '--start-month', '7', '--end-month', '7'],
+    ['-m', 'src.ingestion.refresh', '--start', '2026-07', '--end', '2026-07'],
     ['-m', 'src.storage.sync_data_lake', 'silver', '2026-07'],
     ['-m', 'src.storage.download_from_minio', 'silver', '2026-07'],
     ['scripts/prepare_bronze_zip.py', '2026-07', '/tmp/absent-source.zip'],

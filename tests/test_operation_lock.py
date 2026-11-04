@@ -96,8 +96,9 @@ def test_public_operations_fail_before_any_work(monkeypatch, operation, tmp_path
 @pytest.mark.parametrize('module_name', [
     'main', 'src.database.load_gold', 'src.database.load_staging', 'src.database.gold_audit',
     'src.transformation.transform_complaints', 'src.ingestion.download_complaints',
-    'src.ingestion.backfill', 'src.storage.sync_data_lake',
+    'src.ingestion.backfill', 'src.ingestion.refresh', 'src.storage.sync_data_lake',
     'src.storage.download_from_minio', 'scripts.prepare_bronze_zip', 'scripts.download_direct',
+    'src.monitoring.gold_health',
 ])
 def test_cli_help_does_not_connect_or_acquire_lock(monkeypatch, module_name):
     import importlib

@@ -1,21 +1,10 @@
 """Definições dos indicadores e recorte único da visão geral."""
-from numbers import Integral
 
+from dashboard.constants import MESES
 from dashboard.services.analytics import consultar_lote
+from dashboard.services.common import AREA, BASE, FILTRO, NOME_EMPRESA, parametros_periodo
 
 
-MESES = {
-    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
-    5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
-    9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro",
-}
-NOME_EMPRESA = "BTRIM(e.nome_fantasia)"
-AREA = "COALESCE(NULLIF(BTRIM(c.area), ''), 'Não informado')"
-FILTRO = "t.ano = :ano AND t.mes = ANY(CAST(:meses AS INTEGER[]))"
-BASE = """
-    FROM warehouse.fato_reclamacao f
-    JOIN warehouse.dim_tempo t ON t.data_id = f.data_id
-"""
 CONSULTAS = {
     # Soma/contagem preservam médias ponderadas e nulos. O DISTINCT final opera
     # sobre grupos empresa/UF, reduzindo a ordenação de milhões de fatos.
@@ -69,18 +58,6 @@ CONSULTAS = {
         ORDER BY reclamacoes DESC, area LIMIT 15
     """,
 }
-
-
-def parametros_periodo(ano, meses):
-    """Normaliza o recorte e rejeita seleção vazia antes de consultar o banco."""
-    if isinstance(ano, bool) or not isinstance(ano, Integral) or not 1 <= ano <= 9999:
-        raise ValueError("Ano inválido.")
-    meses = list(meses)
-    if not meses:
-        raise ValueError("Selecione pelo menos um mês.")
-    if any(isinstance(mes, bool) or not isinstance(mes, Integral) or mes not in MESES for mes in meses):
-        raise ValueError("Meses inválidos.")
-    return {"ano": int(ano), "meses": sorted({int(mes) for mes in meses})}
 
 
 def carregar_visao_geral(ano, meses):
