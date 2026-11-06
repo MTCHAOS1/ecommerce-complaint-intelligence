@@ -56,11 +56,12 @@ def render():
             st.info('Selecione de uma a três empresas para comparar.')
     st.caption(f'Indicadores e problemas abaixo: {empresa}.')
     st.subheader('Resumo do recorte')
+    st.caption(f"Tempos inválidos excluídos da média: {inteiro(indicadores.get('tempos_invalidos', 0))}. Registros originais preservados.")
     st.metric('Reclamações', inteiro(indicadores['reclamacoes']))
     esquerda, direita = st.columns(2)
     with esquerda:
         st.metric('Tempo médio de resposta', media(indicadores['tempo_medio']))
-        st.caption(f"Base: {inteiro(indicadores['base_tempo'])} reclamações com tempo informado. Unidade registrada na fonte.")
+        st.caption(f"Base: {inteiro(indicadores['base_tempo'])} reclamações com tempo válido informado. Unidade registrada na fonte.")
     with direita:
         st.metric('Nota média informada (1 a 5)', media(indicadores['nota_media']))
         st.caption(f"Base: {inteiro(indicadores['base_nota'])} reclamações com nota informada.")

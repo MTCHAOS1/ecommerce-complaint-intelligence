@@ -217,7 +217,7 @@ Tempos referentes a uma execução anterior à última integração do controle 
 
 ### Validação automatizada
 
-A suíte completa validada em 06/11/2026 passou com **297 testes e 5 subtestes**,
+A suíte completa validada em 06/11/2026 passou com **300 testes e 5 subtestes**,
 sem testes pulados, usando PostgreSQL descartável. A suíte padrão não
 executa as integrações PostgreSQL sem configuração explícita.
 
@@ -255,8 +255,9 @@ inclui hashes de artefatos; outras versões de Python e plataformas ainda não
 foram validadas. A instalação dos pacotes depende de acesso ao índice configurado.
 
 Copie `.env.example` para `.env` somente se ele ainda não existir, configure as
-credenciais e crie o usuário/banco PostgreSQL. O Compose provisiona apenas o
-MinIO; o PostgreSQL é instalado separadamente. O roteiro completo, incluindo
+credenciais e crie o usuário/banco PostgreSQL. O Compose da raiz provisiona apenas o
+MinIO; nesse modo o PostgreSQL é instalado separadamente. Para uma prévia isolada
+com PostgreSQL e dashboard em containers, consulte [deploy/README.md](deploy/README.md). O roteiro completo, incluindo
 criação do usuário e banco, está em
 [docs/Comandos.md](docs/Comandos.md#0-instalação-em-um-checkout-novo).
 
@@ -443,8 +444,9 @@ aditiva concluídos. O dashboard recebeu correções de contraste, gráficos
 responsivos, atalhos de período, cobertura e última carga bem-sucedida.
 
 **Qualidade histórica:** dois tempos negativos em junho/2026 (-16 e -4) foram
-preservados e são sinalizados por DOMINIO_INVALIDO e no dashboard. Indicadores
-históricos mantêm esses registros; novas cargas os rejeitam. Não há correção
+preservados e são sinalizados por DOMINIO_INVALIDO e no dashboard. As médias
+e bases de tempo excluem esses dois valores, mantendo o total de reclamações;
+novas cargas os rejeitam. Não há correção
 silenciosa nem auditoria retroativa de origem.
 
 **Recuperação comprovada:** backup local anterior à migração restaurado em
@@ -459,3 +461,15 @@ incompleta retorna erro, sem alterar os fatos anteriores ou enviar mensagens.
 Procedimentos atuais: [migração e proveniência](docs/Comandos.md#19-contrato-migração-e-proveniência--06112026),
 [backup e recuperação](docs/Comandos.md#20-backup-e-ensaio-de-recuperação) e
 [estado da atualização](docs/Comandos.md#21-estado-da-atualização-recorrente).
+
+## Prévia de implantação — 06/11/2026
+
+Ambiente Docker isolado com PostgreSQL persistente, leitor restrito, segredos
+por arquivo e dashboard em http://localhost:8502, somente no host local.
+Inicialização, migrações e permissões são verificadas no CI. O ensaio local
+restaurou uma cópia dos 3.198.882 fatos e preservou os dados após reinício.
+A base válida de tempo é 3.029.879, com dois valores inválidos excluídos das
+médias e contados explicitamente na interface. Dados originais preservados.
+
+Instruções e limites: [deploy/README.md](deploy/README.md). Hospedagem pública,
+HTTPS, política de acesso e backup externo continuam pendentes.

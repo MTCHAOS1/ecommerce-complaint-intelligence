@@ -1,0 +1,16 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+**/__pycache__
+.venv
+.pytest_cache
+logs
+outputs
+work
+tests
+data
+*.pem
+*.key
+deploy/secrets

@@ -333,3 +333,20 @@ def test_geography_kpis_match_reference_with_repeated_normalized_cities(dashboar
                     assert current == {'reclamacoes': 5, 'ufs': 3, 'cidades': 3}
     finally:
         engine.dispose()
+
+
+def test_invalid_times_are_excluded_consistently_without_deleting_facts(dashboard_database):
+    from dashboard.services.companies import carregar_empresa
+    from dashboard.services.specialized import carregar_atendimento
+    dashboard_database("UPDATE warehouse.fato_reclamacao SET tempo_resposta=-4 WHERE data_id=20260701")
+    overview_data = overview.carregar_visao_geral(2026, [7])['indicadores'].iloc[0]
+    service_data = carregar_atendimento(2026, [7])
+    for row in [overview_data, service_data['indicadores'].iloc[0], service_data['mensal'].iloc[0]]:
+        assert row['tempo_medio'] == 20
+        assert row['base_tempo'] == 1
+        assert row['tempos_invalidos'] == 1
+        assert row['reclamacoes'] == 4
+    company = carregar_empresa(2026, [7], 'Empresa')['indicadores'].iloc[0]
+    assert pd.isna(company['tempo_medio']) and company['base_tempo'] == 0
+    assert company['tempos_invalidos'] == 1
+    assert dashboard_database('SELECT tempo_resposta FROM warehouse.fato_reclamacao WHERE data_id=20260701') == '-4'

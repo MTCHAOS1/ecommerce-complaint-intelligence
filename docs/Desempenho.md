@@ -140,3 +140,12 @@ Evidências locais não versionadas:
 
 - `data/diagnostics/specialized_reader_20261106T144930Z.json`: amostras dos seis serviços.
 - `data/diagnostics/geography_candidate_20261106T145101Z.json`: indicadores e planos completos da comparação alternada.
+
+## Mudança posterior na qualidade dos tempos — 06/11/2026
+
+Os ensaios acima antecedem a exclusão dos dois tempos negativos históricos.
+A consulta atual e a referência de regressão excluem tempos não finitos ou
+negativos da soma e da base, contabilizando as exclusões. Na Gold principal,
+a base válida passou a 3.029.879; as 3.198.882 reclamações foram preservadas.
+Os tempos de execução publicados acima são históricos e não foram novamente
+medidos para essa mudança de política.

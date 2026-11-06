@@ -23,6 +23,7 @@ def render():
     if kpis['reclamacoes']:
         atendimento_mensal(dados['mensal'], recorte[1])
     st.subheader('Resumo do recorte')
+    st.caption(f"Tempos inválidos excluídos da média: {inteiro(kpis.get('tempos_invalidos', 0))}. Registros originais preservados.")
     esquerda, direita = st.columns(2)
     esquerda.metric('Reclamações', inteiro(kpis['reclamacoes']))
     direita.metric('Respondidas entre registros informados', media(kpis['percentual_respondidas']) + ('%' if kpis['base_respondida'] else ''))
@@ -38,7 +39,7 @@ def render():
         st.subheader('Atendimento por mês — médias e bases')
         mensal = dados['mensal'].copy()
         mensal['mes'] = mensal['mes'].map(MESES)
-        st.dataframe(mensal.rename(columns={'mes': 'Mês', 'reclamacoes': 'Reclamações', 'tempo_medio': 'Tempo médio', 'base_tempo': 'Base de tempos', 'nota_media': 'Nota média', 'base_nota': 'Base de notas', 'respondidas': 'Respondidas', 'base_respondida': 'Base de resposta', 'percentual_respondidas': 'Respondidas (%)'}), hide_index=True)
+        st.dataframe(mensal.rename(columns={'mes': 'Mês', 'reclamacoes': 'Reclamações', 'tempo_medio': 'Tempo médio', 'base_tempo': 'Base de tempos válidos', 'tempos_invalidos': 'Tempos excluídos', 'nota_media': 'Nota média', 'base_nota': 'Base de notas', 'respondidas': 'Respondidas', 'base_respondida': 'Base de resposta', 'percentual_respondidas': 'Respondidas (%)'}), hide_index=True)
     barras(dados['avaliacoes'], 'avaliacao', 'Avaliação da reclamação')
     st.subheader('Distribuição das notas preenchidas')
     if dados['notas'].empty:

@@ -5,6 +5,8 @@ from numbers import Integral
 from dashboard.constants import MESES
 
 
+TEMPO_VALIDO = "f.tempo_resposta >= 0 AND f.tempo_resposta < 'Infinity'::numeric"
+
 NOME_EMPRESA = "BTRIM(e.nome_fantasia)"
 AREA = "COALESCE(NULLIF(BTRIM(c.area), ''), 'Não informado')"
 FILTRO = "t.ano = :ano AND t.mes = ANY(CAST(:meses AS INTEGER[]))"

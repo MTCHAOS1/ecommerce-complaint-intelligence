@@ -1,15 +1,16 @@
 """Análise por nome fantasia normalizado, com recorte parametrizado."""
 
 from dashboard.services.analytics import consultar_lote
-from dashboard.services.common import BASE, FILTRO, NOME_EMPRESA, parametros_periodo
+from dashboard.services.common import TEMPO_VALIDO, BASE, FILTRO, NOME_EMPRESA, parametros_periodo
 
 BASE_EMPRESA = BASE + ' JOIN warehouse.dim_empresa e ON e.empresa_id = f.empresa_id '
 RECORTE = FILTRO + f' AND {NOME_EMPRESA} = :empresa'
 CONSULTAS = {
     'indicadores': f"""
         SELECT COUNT(*) AS reclamacoes,
-               ROUND(AVG(f.tempo_resposta), 2) AS tempo_medio,
-               COUNT(f.tempo_resposta) AS base_tempo,
+               ROUND(AVG(f.tempo_resposta) FILTER (WHERE {TEMPO_VALIDO}), 2) AS tempo_medio,
+               COUNT(f.tempo_resposta) FILTER (WHERE {TEMPO_VALIDO}) AS base_tempo,
+               COUNT(*) FILTER (WHERE f.tempo_resposta IS NOT NULL AND NOT ({TEMPO_VALIDO})) AS tempos_invalidos,
                ROUND(AVG(f.nota_do_consumidor), 2) AS nota_media,
                COUNT(f.nota_do_consumidor) AS base_nota
         {BASE_EMPRESA} WHERE {RECORTE}

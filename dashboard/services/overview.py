@@ -2,7 +2,7 @@
 
 from dashboard.constants import MESES
 from dashboard.services.analytics import consultar_lote
-from dashboard.services.common import AREA, BASE, FILTRO, NOME_EMPRESA, parametros_periodo
+from dashboard.services.common import TEMPO_VALIDO, AREA, BASE, FILTRO, NOME_EMPRESA, parametros_periodo
 
 
 CONSULTAS = {
@@ -12,7 +12,8 @@ CONSULTAS = {
         WITH grupos AS (
             SELECT {NOME_EMPRESA} AS empresa, l.uf,
                    COUNT(*) AS reclamacoes,
-                   SUM(f.tempo_resposta) AS soma_tempo, COUNT(f.tempo_resposta) AS base_tempo,
+                   SUM(f.tempo_resposta) FILTER (WHERE {TEMPO_VALIDO}) AS soma_tempo, COUNT(f.tempo_resposta) FILTER (WHERE {TEMPO_VALIDO}) AS base_tempo,
+               COUNT(*) FILTER (WHERE f.tempo_resposta IS NOT NULL AND NOT ({TEMPO_VALIDO})) AS tempos_invalidos,
                    SUM(f.nota_do_consumidor) AS soma_nota, COUNT(f.nota_do_consumidor) AS base_nota
             {BASE}
             JOIN warehouse.dim_empresa e ON e.empresa_id = f.empresa_id
@@ -24,6 +25,7 @@ CONSULTAS = {
                COUNT(DISTINCT empresa) AS empresas, COUNT(DISTINCT uf) AS ufs,
                ROUND(SUM(soma_tempo) / NULLIF(SUM(base_tempo), 0), 2) AS tempo_medio,
                COALESCE(SUM(base_tempo), 0)::bigint AS base_tempo,
+               COALESCE(SUM(tempos_invalidos), 0)::bigint AS tempos_invalidos,
                ROUND(SUM(soma_nota) / NULLIF(SUM(base_nota), 0), 2) AS nota_media,
                COALESCE(SUM(base_nota), 0)::bigint AS base_nota
         FROM grupos

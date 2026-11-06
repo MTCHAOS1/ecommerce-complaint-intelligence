@@ -3,8 +3,9 @@
 SELECT COUNT(*) AS reclamacoes,
                COUNT(DISTINCT BTRIM(e.nome_fantasia)) AS empresas,
                COUNT(DISTINCT l.uf) AS ufs,
-               ROUND(AVG(f.tempo_resposta), 2) AS tempo_medio,
-               COUNT(f.tempo_resposta) AS base_tempo,
+               ROUND(AVG(f.tempo_resposta) FILTER (WHERE f.tempo_resposta >= 0 AND f.tempo_resposta < 'Infinity'::numeric), 2) AS tempo_medio,
+               COUNT(f.tempo_resposta) FILTER (WHERE f.tempo_resposta >= 0 AND f.tempo_resposta < 'Infinity'::numeric) AS base_tempo,
+               COUNT(*) FILTER (WHERE f.tempo_resposta IS NOT NULL AND NOT (f.tempo_resposta >= 0 AND f.tempo_resposta < 'Infinity'::numeric)) AS tempos_invalidos,
                ROUND(AVG(f.nota_do_consumidor), 2) AS nota_media,
                COUNT(f.nota_do_consumidor) AS base_nota
 

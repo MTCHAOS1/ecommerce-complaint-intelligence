@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
@@ -8,13 +9,20 @@ from sqlalchemy.engine import URL
 load_dotenv()
 
 
+def secret(name):
+    file = os.getenv(name + '_FILE')
+    if file and os.getenv(name) is not None:
+        raise ValueError(f'Configure somente {name} ou {name}_FILE.')
+    return Path(file).read_text().strip() if file else os.getenv(name)
+
+
 def get_engine():
     """Cria e retorna uma Engine configurada para o PostgreSQL."""
 
     database_url = URL.create(
         drivername="postgresql+psycopg",
         username=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
+        password=secret("DB_PASSWORD"),
         host=os.getenv("DB_HOST"),
         port=int(os.getenv("DB_PORT", "5432")),
         database=os.getenv("DB_NAME"),
@@ -31,7 +39,7 @@ def get_engine():
 def get_dashboard_engine():
     """Credenciais analíticas independentes; configuração parcial é recusada."""
     user = os.getenv('DASHBOARD_DB_USER')
-    password = os.getenv('DASHBOARD_DB_PASSWORD')
+    password = secret('DASHBOARD_DB_PASSWORD')
     if user is None and password is None:
         return get_engine()
     if not user or not password:

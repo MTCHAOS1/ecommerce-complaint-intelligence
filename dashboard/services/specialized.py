@@ -1,7 +1,7 @@
 """Consultas das páginas especializadas com recorte parametrizado e snapshot único."""
 
 from dashboard.services.analytics import consultar_lote
-from dashboard.services.common import BASE, FILTRO, AREA, parametros_periodo
+from dashboard.services.common import TEMPO_VALIDO, BASE, FILTRO, AREA, parametros_periodo
 
 UFS = tuple('AC AL AP AM BA CE DF ES GO MA MT MS MG PA PB PR PE PI RJ RN RS RO RR SC SP SE TO'.split())
 LOCAL = BASE + ' JOIN warehouse.dim_localidade l ON l.localidade_id = f.localidade_id '
@@ -121,10 +121,11 @@ def carregar_problemas(ano, meses, area=None, assunto=None, grupo=None, nivel=No
     return consultar_lote(consultas, parametros)
 
 
-METRICAS_ATENDIMENTO = """
+METRICAS_ATENDIMENTO = f"""
     COUNT(*) AS reclamacoes,
-    ROUND(AVG(f.tempo_resposta), 2) AS tempo_medio,
-    COUNT(f.tempo_resposta) AS base_tempo,
+    ROUND(AVG(f.tempo_resposta) FILTER (WHERE {TEMPO_VALIDO}), 2) AS tempo_medio,
+    COUNT(f.tempo_resposta) FILTER (WHERE {TEMPO_VALIDO}) AS base_tempo,
+               COUNT(*) FILTER (WHERE f.tempo_resposta IS NOT NULL AND NOT ({TEMPO_VALIDO})) AS tempos_invalidos,
     ROUND(AVG(f.nota_do_consumidor), 2) AS nota_media,
     COUNT(f.nota_do_consumidor) AS base_nota,
     COUNT(*) FILTER (WHERE f.respondida IS TRUE) AS respondidas,

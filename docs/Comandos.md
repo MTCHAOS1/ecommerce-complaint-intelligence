@@ -283,7 +283,7 @@ com limpeza após testes. No modo servidor, TEST_DB_NAME indica um banco de
 controle terminado em _test, diferente de DB_NAME; a conta precisa de CREATEDB
 e CREATEROLE para toda a suíte. Somente bancos criados pelo teste são removidos.
 
-Validação local em 06/11/2026: **297 testes e 5 subtestes aprovados**, nenhum
+Validação local em 06/11/2026: **300 testes e 5 subtestes aprovados**, nenhum
 pulado, com PostgreSQL descartável. Dependências, compilação Python, sintaxe
 Bash e git diff --check aprovados. Sem cargas no banco principal ou MinIO.
 
@@ -371,8 +371,9 @@ numéricas protegem a carga SQL direta. A distribuição de notas recusa valores
 fora do domínio, em vez de omiti-los silenciosamente.
 
 Na Gold histórica existem dois tempos negativos em junho/2026 (-16 e -4).
-Eles foram preservados, inclusive nos indicadores históricos, e o diagnóstico
-retorna DOMINIO_INVALIDO. O dashboard informa a limitação em Qualidade dos dados
+Os registros originais foram preservados, mas os tempos inválidos são excluídos
+das médias e bases de tempo, com contagem explícita de exclusões. O total de
+reclamações é preservado e o diagnóstico retorna DOMINIO_INVALIDO. O dashboard informa a limitação em Qualidade dos dados
 históricos. Novas cargas/reprocessamentos desse mês serão recusados enquanto
 o arquivo trouxer esses valores; não há correção automática para zero/nulo.
 
@@ -497,3 +498,21 @@ Posições dos rótulos derivam dos centroides da malha do IBGE. Em regiões den
 o mecanismo de colisão pode ocultar nomes até ampliar o mapa; use os controles
 de zoom ou tela cheia. A legenda horizontal deixa mais largura para o território.
 A roda do mouse rola a página sem alterar o zoom do mapa. Modo noturno mantido.
+
+## 23. Prévia Docker e política dos tempos
+
+Consulte [o roteiro de implantação](../deploy/README.md). O Compose de deploy
+é independente do Compose MinIO da raiz; usa porta local 8502 e volume próprio.
+A instalação começa vazia e não consulta o banco principal. Senhas podem ser
+lidas por DB_PASSWORD_FILE e DASHBOARD_DB_PASSWORD_FILE; configurar a variável
+e seu arquivo simultaneamente é recusado.
+
+Visão Geral, Empresas e Atendimento usam somente tempos finitos e não negativos
+na média e em sua base; zero permanece válido. A Gold principal e a cópia Docker
+retornaram 3.198.882 reclamações, base de tempo 3.029.879 e duas exclusões.
+A regressão SQL cobre médias, bases, agrupamento mensal, empresa com todos os
+tempos inválidos e preservação do registro original.
+
+CI inclui construção e inicialização limpa dos containers, liveness HTTP e
+verificação real do leitor sem INSERT. Os jobs PostgreSQL usam ferramentas
+PGDG 18 para compatibilidade de dump/restore com a matriz 15/18.

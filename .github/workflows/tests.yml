@@ -128,3 +128,49 @@ jobs:
           path: test-results/*.xml
           if-no-files-found: warn
           retention-days: 7
+
+  preview:
+    name: Container deployment smoke test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Prepare isolated secrets and start preview
+        run: |
+          python3 scripts/prepare_deploy.py
+          docker compose -f deploy/compose.yml config --quiet
+          docker compose -f deploy/compose.yml up --build -d
+      - name: Verify liveness and restricted reader
+        run: |
+          python3 - <<'PY'
+          import time, urllib.request
+          for attempt in range(60):
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:8502/_stcore/health', timeout=2) as response:
+                      assert response.read() == b'ok'
+                  break
+              except Exception:
+                  if attempt == 59:
+                      raise
+                  time.sleep(1)
+          PY
+          docker compose -f deploy/compose.yml exec -T dashboard python - <<'PY'
+          import os
+          from pathlib import Path
+          from sqlalchemy import text
+          from src.database.connection import get_dashboard_engine
+          assert os.getuid() != 0
+          assert not Path('/app/.env').exists()
+          engine = get_dashboard_engine()
+          with engine.connect() as connection:
+              assert connection.execute(text('SELECT current_user')).scalar_one() == 'complaints_dashboard'
+              assert connection.execute(text("SELECT has_table_privilege(current_user,'warehouse.fato_reclamacao','SELECT')")).scalar_one()
+              assert not connection.execute(text("SELECT has_table_privilege(current_user,'warehouse.fato_reclamacao','INSERT')")).scalar_one()
+              assert connection.execute(text('SELECT COUNT(*) FROM warehouse.fato_reclamacao')).scalar_one() == 0
+          engine.dispose()
+          PY
+      - name: Stop isolated preview
+        if: always()
+        run: docker compose -f deploy/compose.yml down

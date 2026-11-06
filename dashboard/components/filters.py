@@ -53,7 +53,7 @@ def mostrar_cobertura(periodos, ano):
     if 'registros_invalidos' in periodos and periodos['registros_invalidos'].sum():
         invalidos = periodos[periodos['registros_invalidos'] > 0]
         with st.expander('Qualidade dos dados históricos'):
-            st.warning(f"{int(invalidos['registros_invalidos'].sum())} registros com nota ou tempo de resposta fora do domínio. Os registros históricos e os indicadores foram preservados; considere essa limitação ao interpretar as médias.")
+            st.warning(f"{int(invalidos['registros_invalidos'].sum())} registros com nota ou tempo de resposta fora do domínio. Os registros originais foram preservados; tempos inválidos são excluídos das médias e de suas bases, sem reduzir o total de reclamações.")
             st.dataframe(invalidos[['ano', 'mes', 'registros_invalidos']].rename(columns={
                 'ano': 'Ano', 'mes': 'Mês', 'registros_invalidos': 'Registros inválidos'}), hide_index=True)
     ausentes, abertos = cobertura(periodos, ano)

@@ -42,14 +42,15 @@ def render():
     if indicadores['reclamacoes']:
         evolucao(dados['mensal'], meses, 'overview')
     st.subheader('Resumo do recorte')
+    st.caption(f"Tempos inválidos excluídos da média: {inteiro(indicadores.get('tempos_invalidos', 0))}. Registros originais preservados.")
     col1, col2, col3 = st.columns(3)
     col1.metric('Reclamações', inteiro(indicadores['reclamacoes']), help='Quantidade de registros na Gold para as datas de finalização selecionadas.')
     col2.metric('Empresas (nome fantasia)', inteiro(indicadores['empresas']), help='Nomes fantasia distintos após remover espaços nas extremidades, agrupando segmentos do mesmo nome. É a mesma definição usada no ranking; não é uma contagem de CNPJs.')
     col3.metric('UFs', inteiro(indicadores['ufs']), help='Unidades federativas com reclamações no recorte, incluindo o Distrito Federal.')
     col4, col5 = st.columns(2)
     with col4:
-        st.metric('Tempo médio de resposta', media(indicadores['tempo_medio']), help='Média dos tempos preenchidos. Valores ausentes não são tratados como zero. A unidade é a registrada na fonte.')
-        st.caption(f"Base: {inteiro(indicadores['base_tempo'])} reclamações com tempo informado.")
+        st.metric('Tempo médio de resposta', media(indicadores['tempo_medio']), help='Média dos tempos válidos preenchidos. Valores ausentes não são tratados como zero. A unidade é a registrada na fonte.')
+        st.caption(f"Base: {inteiro(indicadores['base_tempo'])} reclamações com tempo válido informado.")
     with col5:
         st.metric('Nota média informada (1 a 5)', media(indicadores['nota_media']), help='Média das notas preenchidas, independentemente do rótulo de avaliação. Valores ausentes não são tratados como zero.')
         st.caption(f"Base: {inteiro(indicadores['base_nota'])} reclamações com nota informada.")

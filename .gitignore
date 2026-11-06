@@ -65,3 +65,6 @@ test-results/
 
 # Backups privados e ensaios de recuperação
 data/backups/
+
+# Segredos da implantação isolada
+deploy/secrets/

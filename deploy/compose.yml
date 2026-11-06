@@ -1,0 +1,73 @@
+name: eci-preview
+services:
+  postgres:
+    image: postgres:18.6-bookworm@sha256:f1ea2a1a4fb7b68d4836be1fdcb8a6466a89b072158bf9d97663600538c294c5
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password, pipeline_password, reader_password]
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ../sql:/opt/eci-sql:ro
+      - ./init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -h 127.0.0.1 -U postgres -d ecommerce_complaints]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+    networks: [backend]
+
+  migrate:
+    image: eci-app:preview
+    build: ..
+    command: [python, -m, src.operations.migrate]
+    healthcheck:
+      disable: true
+    environment:
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      DB_NAME: ecommerce_complaints
+      DB_USER: complaints_user
+      DB_PASSWORD_FILE: /run/secrets/pipeline_password
+    secrets: [pipeline_password]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend]
+
+  dashboard:
+    image: eci-app:preview
+    build: ..
+    environment:
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      DB_NAME: ecommerce_complaints
+      DASHBOARD_DB_USER: complaints_dashboard
+      DASHBOARD_DB_PASSWORD_FILE: /run/secrets/reader_password
+    secrets: [reader_password]
+    ports: ['127.0.0.1:8502:8501']
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+      - /home/app:uid=10001,gid=10001,mode=0700
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    networks: [backend, frontend]
+
+volumes:
+  postgres_data:
+networks:
+  backend:
+    internal: true
+  frontend:
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+  pipeline_password:
+    file: ./secrets/pipeline_password
+  reader_password:
+    file: ./secrets/reader_password
