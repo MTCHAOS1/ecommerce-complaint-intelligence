@@ -1,0 +1,20 @@
+{
+    admin off
+    skip_install_trust
+}
+
+{$DASHBOARD_DOMAIN} {
+    basic_auth argon2id {
+        import /run/secrets/dashboard_auth
+    }
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+        X-Frame-Options DENY
+        -Server
+    }
+    reverse_proxy dashboard:8501 {
+        header_up -Authorization
+    }
+}

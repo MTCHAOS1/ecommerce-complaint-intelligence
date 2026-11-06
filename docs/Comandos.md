@@ -27,7 +27,9 @@ if [ ! -e .env ]; then cp .env.example .env; fi
 nano .env
 ```
 
-Defina DB_HOST/PORT/NAME/USER/PASSWORD e as credenciais MinIO. A API S3 usa
+Defina DB_HOST/PORT/NAME/USER/PASSWORD. Prepare `.env.minio-admin` a partir
+do exemplo, com senha forte e chmod 600. MINIO_ACCESS_KEY/MINIO_SECRET_KEY
+podem ficar vazios até o provisionamento. A API S3 usa
 porta 9000; o console usa 9001. Não versione o arquivo .env.
 
 Para PostgreSQL instalado no WSL, criar usuário/banco somente se ausentes:
@@ -52,12 +54,14 @@ com dados a preservar.
 ```bash
 docker compose config --quiet
 docker compose up -d
-python -m src.storage.initialize_buckets
+python scripts/provision_minio_pipeline.py
 python main.py --help
 ```
 
-Aguarde MinIO ficar disponível antes de criar buckets. Buckets existentes são
-preservados. Instalação não baixa dados nem preenche a Gold.
+Aguarde MinIO ficar disponível antes do provisionamento. O comando cria apenas
+buckets ausentes, habilita versionamento e configura a conta restrita, sem apagar
+objetos. Instalação não baixa dados nem preenche a Gold. Administração e
+restauração usam conta separada: [Seguranca.md](Seguranca.md).
 
 ## 1. Entrar no projeto e ativar o Python
 
@@ -283,7 +287,7 @@ com limpeza após testes. No modo servidor, TEST_DB_NAME indica um banco de
 controle terminado em _test, diferente de DB_NAME; a conta precisa de CREATEDB
 e CREATEROLE para toda a suíte. Somente bancos criados pelo teste são removidos.
 
-Validação local em 06/11/2026: **300 testes e 5 subtestes aprovados**, nenhum
+Validação local em 06/11/2026: **303 testes e 5 subtestes aprovados**, nenhum
 pulado, com PostgreSQL descartável. Dependências, compilação Python, sintaxe
 Bash e git diff --check aprovados. Sem cargas no banco principal ou MinIO.
 
@@ -516,3 +520,10 @@ tempos inválidos e preservação do registro original.
 CI inclui construção e inicialização limpa dos containers, liveness HTTP e
 verificação real do leitor sem INSERT. Os jobs PostgreSQL usam ferramentas
 PGDG 18 para compatibilidade de dump/restore com a matriz 15/18.
+
+## 24. Segurança e acesso privado
+
+Procedimentos atuais: [revisão de segurança e MinIO](Seguranca.md) e
+[login/HTTPS](../deploy/ACCESS.md). O Compose de acesso remove a porta 8502 e
+protege todos os caminhos e WebSockets. Sem domínio, validar somente localmente
+com `scripts/check_access.py`; emissão pública ACME ainda depende do servidor.

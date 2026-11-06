@@ -53,9 +53,10 @@ principal. A implantação limpa não carrega backups automaticamente.
 
 ## Antes da publicação externa
 
-Definir hospedagem, domínio, política de acesso e HTTPS. A prévia não inclui
-proxy público, certificados ou autenticação de visitantes. Não exponha a porta
-como substituto dessa preparação. Backup externo, retenção e credenciais
+Política escolhida: login obrigatório. O overlay opcional de proxy, login e
+HTTPS está em [ACCESS.md](ACCESS.md); ele remove a porta direta do dashboard.
+Sem o overlay, a prévia continua apenas HTTP local. Hospedagem, domínio e
+certificado público ainda precisam ser definidos e validados. Backup externo, retenção e credenciais
 próprias para pipeline e armazenamento continuam necessários.
 
 ## Evidência local — 06/11/2026
@@ -67,3 +68,5 @@ foi restaurada no banco isolado: 3.198.882 fatos, base válida de tempo 3.029.87
 e duas exclusões, preservando os dois registros negativos originais.
 Reinício dos serviços preservou os dados; navegador exibiu a prévia em modo
 noturno. O banco e o MinIO principais não foram alterados pelo ensaio.
+
+Revisão das permissões e dependências: [Seguranca.md](../docs/Seguranca.md).

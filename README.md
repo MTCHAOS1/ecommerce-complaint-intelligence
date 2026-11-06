@@ -217,7 +217,7 @@ Tempos referentes a uma execução anterior à última integração do controle 
 
 ### Validação automatizada
 
-A suíte completa validada em 06/11/2026 passou com **300 testes e 5 subtestes**,
+A suíte completa validada em 06/11/2026 passou com **303 testes e 5 subtestes**,
 sem testes pulados, usando PostgreSQL descartável. A suíte padrão não
 executa as integrações PostgreSQL sem configuração explícita.
 
@@ -271,11 +271,12 @@ psql -X -h localhost -p 5432 -U complaints_user -d ecommerce_complaints -v ON_ER
 O inicializador recusa bancos que já contenham objetos nos schemas `staging`,
 `warehouse` ou `metadata`; ele não executa migrações nem recria um banco existente.
 
-Inicie o MinIO e crie somente os buckets ausentes:
+Prepare `.env.minio-admin` a partir de `.env.minio-admin.example` (senha própria,
+chmod 600). Inicie o MinIO e provisione os buckets versionados e a conta restrita:
 
 ```bash
 docker compose up -d
-python -m src.storage.initialize_buckets
+python scripts/provision_minio_pipeline.py
 ```
 
 Se o MinIO ainda estiver iniciando, aguarde sua disponibilidade e repita o último
@@ -473,3 +474,14 @@ médias e contados explicitamente na interface. Dados originais preservados.
 
 Instruções e limites: [deploy/README.md](deploy/README.md). Hospedagem pública,
 HTTPS, política de acesso e backup externo continuam pendentes.
+
+## Segurança e acesso privado — 06/11/2026
+
+Revisão de segredos no histórico, correção de dependências vulneráveis e conta
+MinIO restrita concluídas. CI inclui auditoria Python e teste de login/HTTPS.
+A política escolhida é login obrigatório; domínio ainda não definido.
+O proxy é opcional ao Compose de prévia e remove sua porta direta.
+
+Veja [revisão de segurança](docs/Seguranca.md) e
+[acesso com HTTPS](deploy/ACCESS.md). Certificado público depende do domínio
+e do servidor definitivo; o ensaio atual usa apenas uma CA local validada.

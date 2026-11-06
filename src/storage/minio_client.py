@@ -1,4 +1,5 @@
 from src.database.gold_lock import exclusive_operation
+from src.database.connection import secret
 
 import os
 from pathlib import Path
@@ -19,12 +20,16 @@ def get_minio_client():
     Cria um cliente S3 conectado ao MinIO.
     """
 
-    access_key = os.getenv("MINIO_ROOT_USER")
-    secret_key = os.getenv("MINIO_ROOT_PASSWORD")
+    access_key = secret('MINIO_ACCESS_KEY')
+    secret_key = secret('MINIO_SECRET_KEY')
+    if access_key is None and secret_key is None:
+        # Compatibilidade local; instalações novas devem usar a conta restrita.
+        access_key = os.getenv('MINIO_ROOT_USER')
+        secret_key = os.getenv('MINIO_ROOT_PASSWORD')
 
     if not access_key or not secret_key:
         raise RuntimeError(
-            "Credenciais do MinIO não configuradas no .env"
+            "Configure MINIO_ACCESS_KEY e MINIO_SECRET_KEY juntos."
         )
 
     return boto3.client(

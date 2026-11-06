@@ -1,0 +1,2 @@
+# Ferramenta independente; instalar em venv separado para não alterar a aplicação.
+pip-audit==2.10.1

@@ -3,7 +3,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
 COPY requirements.txt ./
 COPY requirements/ ./requirements/
-RUN python -m pip install -r requirements/base.txt -r requirements/dashboard.txt && python -m pip check
+RUN python -m pip install --upgrade pip==26.2 && python -m pip install -r requirements/base.txt -r requirements/dashboard.txt && python -m pip check
 RUN groupadd --gid 10001 app && useradd --uid 10001 --gid app --no-create-home app
 COPY . .
 RUN mkdir -p /app/data/raw /app/data/cache /app/data/processed /app/logs && chown -R app:app /app/data /app/logs

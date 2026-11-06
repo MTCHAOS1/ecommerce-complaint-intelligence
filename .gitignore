@@ -7,6 +7,7 @@ venv/
 .env
 .env.*
 !.env.example
+!.env.minio-admin.example
 
 # Credenciais e certificados
 *.pem
@@ -68,3 +69,6 @@ data/backups/
 
 # Segredos da implantação isolada
 deploy/secrets/
+
+# Ferramentas e relatórios temporários
+work/

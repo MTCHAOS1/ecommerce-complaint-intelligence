@@ -41,6 +41,8 @@ def get_dashboard_engine():
     user = os.getenv('DASHBOARD_DB_USER')
     password = secret('DASHBOARD_DB_PASSWORD')
     if user is None and password is None:
+        if os.getenv('DASHBOARD_REQUIRE_READER') == '1':
+            raise ValueError('Credenciais próprias de leitura são obrigatórias neste ambiente.')
         return get_engine()
     if not user or not password:
         raise ValueError('Configure DASHBOARD_DB_USER e DASHBOARD_DB_PASSWORD juntos.')

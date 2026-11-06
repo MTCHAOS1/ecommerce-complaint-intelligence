@@ -1,0 +1,54 @@
+services:
+  proxy-init:
+    image: caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee
+    command: [sh, -c, 'chown 10001:10001 /data /config']
+    volumes: [caddy_data:/data, caddy_config:/config]
+    network_mode: none
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [CHOWN]
+  dashboard:
+    ports: !reset []
+    networks: !override [backend, app]
+    environment:
+      DASHBOARD_REQUIRE_READER: '1'
+      STREAMLIT_BROWSER_SERVER_ADDRESS: ${DASHBOARD_DOMAIN:?Defina o dominio ou localhost para ensaio local}
+      STREAMLIT_SERVER_ENABLE_CORS: 'true'
+      STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION: 'true'
+      STREAMLIT_SERVER_ENABLE_STATIC_SERVING: 'false'
+      STREAMLIT_CLIENT_SHOW_ERROR_DETAILS: 'none'
+  proxy:
+    image: caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee
+    user: '10001:10001'
+    environment:
+      DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:?Defina o dominio ou localhost para ensaio local}
+      XDG_DATA_HOME: /data
+      XDG_CONFIG_HOME: /config
+    ports:
+      - '${PROXY_BIND:-127.0.0.1}:${HTTPS_PORT:-8443}:443'
+      - '${PROXY_BIND:-127.0.0.1}:${HTTP_PORT:-8080}:80'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    secrets: [dashboard_auth]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    depends_on:
+      proxy-init:
+        condition: service_completed_successfully
+      dashboard:
+        condition: service_healthy
+    networks: [app, frontend]
+networks:
+  app:
+    internal: true
+volumes:
+  caddy_data:
+  caddy_config:
+secrets:
+  dashboard_auth:
+    file: ./secrets/dashboard_auth

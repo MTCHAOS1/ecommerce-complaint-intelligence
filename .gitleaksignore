@@ -1,0 +1,4 @@
+# Falso positivo revisado: identificador de widget Streamlit em teste.
+70de4d15dacb7309fc1a1f4458127744095b18a6:tests/test_companies_ui.py:generic-api-key:43
+# Mesmo achado ao examinar os arquivos atuais montados em /repo.
+/repo/tests/test_companies_ui.py:generic-api-key:43
