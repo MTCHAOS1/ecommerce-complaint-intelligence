@@ -1,6 +1,8 @@
 """Auditoria das execuções mensais da camada Gold."""
 
 from datetime import date
+from pathlib import Path
+from src.storage.artifacts import sha256
 
 from sqlalchemy import text
 
@@ -11,8 +13,10 @@ from src.database.gold_lock import gold_execution_lock
 
 INSERT_RUNNING = text("""
     INSERT INTO metadata.gold_load_control
-        (periodo, status, registros_staging)
-    VALUES (:periodo, 'RUNNING', :registros_staging)
+        (periodo, status, registros_staging, lineage)
+    VALUES (:periodo, 'RUNNING', :registros_staging,
+            COALESCE((SELECT staging_lineage FROM metadata.ingestion_control WHERE period=:period_text AND staging_lineage->>'staging_relation_oid' = CAST('staging.complaints'::regclass::oid AS text)), '{}'::jsonb)
+            || jsonb_build_object('gold_sql_sha256', CAST(:sql_sha256 AS text)))
     RETURNING execution_id
 """)
 
@@ -56,7 +60,8 @@ def start_gold_execution(period: str) -> tuple[int, int]:
             # A Staging é validada previamente pelo carregador Python.
             execution_id = connection.execute(
                 INSERT_RUNNING,
-                {"periodo": period_date, "registros_staging": staging_count},
+                {"periodo": period_date, "period_text": period, "registros_staging": staging_count,
+                 "sql_sha256": sha256(Path(__file__).resolve().parents[2] / "sql/warehouse/load_star_schema_body.sql")},
             ).scalar_one()
         return execution_id, staging_count
     finally:

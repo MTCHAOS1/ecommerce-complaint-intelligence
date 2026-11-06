@@ -62,3 +62,6 @@ htmlcov/
 
 # Relatórios locais de testes (artefatos no CI)
 test-results/
+
+# Backups privados e ensaios de recuperação
+data/backups/

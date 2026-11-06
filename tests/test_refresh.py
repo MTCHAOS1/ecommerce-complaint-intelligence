@@ -45,7 +45,7 @@ def operations(monkeypatch):
         def operation(*args, _name=name, **kwargs):
             assert held, 'Toda etapa precisa manter o lock.'
             calls.append((_name, args, kwargs))
-            return True
+            return {f'{args[0]}-{args[1]:02d}': 'DOWNLOADED'} if _name == 'run_backfill' else None
         monkeypatch.setattr(module, name, Mock(side_effect=operation))
     monkeypatch.setattr(module, 'is_complete', Mock(return_value=False))
     return calls
@@ -56,7 +56,7 @@ def test_skips_audited_month_and_processes_missing_month(operations, monkeypatch
     assert module.refresh(['2026-08', '2026-09'], delay=0) == {
         '2026-08': 'SKIPPED', '2026-09': 'SUCCESS'}
     assert operations == [
-        ('run_backfill', (2026, 9, 9, 0), {}),
+        ('run_backfill', (2026, 9, 9, 0), {'force_download': False, 'return_results': True}),
         ('transform', ('2026-09', 'minio'), {'upload': True}),
         ('load_staging', ('2026-09', 'minio'), {}),
         ('load_gold', ('2026-09',), {}),
@@ -64,7 +64,7 @@ def test_skips_audited_month_and_processes_missing_month(operations, monkeypatch
 
 
 def test_pending_bronze_never_loads_staging_or_gold(operations):
-    module.run_backfill.return_value = False
+    module.run_backfill.return_value = {'2026-09': 'PENDING'}
     module.run_backfill.side_effect = None
     assert module.refresh(['2026-09'], delay=0) == {'2026-09': 'PENDING'}
     module.transform.assert_not_called()
@@ -82,6 +82,7 @@ def test_failure_does_not_stop_next_month_or_load_failed_month_gold(operations):
 def test_explicit_reprocess_bypasses_skip(operations):
     assert module.refresh(['2026-09'], reprocess=True, delay=0) == {'2026-09': 'SUCCESS'}
     module.is_complete.assert_not_called()
+    module.run_backfill.assert_called_once_with(2026, 9, 9, 0, force_download=True, return_results=True)
 
 
 def test_lock_rejection_prevents_work(monkeypatch):
@@ -140,3 +141,14 @@ def test_real_sql_requires_latest_success_and_matching_counts(postgres):
             assert not module.is_complete(connection, '2026-07')
     finally:
         engine.dispose()
+
+
+def test_collection_failure_is_failed_and_next_month_continues(operations):
+    module.run_backfill.side_effect = [
+        {'2026-08': 'FAILED'}, {'2026-09': 'DOWNLOADED'},
+    ]
+    assert module.refresh(['2026-08', '2026-09'], delay=0) == {
+        '2026-08': 'FAILED', '2026-09': 'SUCCESS',
+    }
+    module.transform.assert_called_once_with('2026-09', 'minio', upload=True)
+    module.load_gold.assert_called_once_with('2026-09')

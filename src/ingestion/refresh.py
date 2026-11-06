@@ -1,6 +1,8 @@
 """Atualização recorrente Bronze → Gold, com retomada por mês auditado."""
 import argparse
-from datetime import date
+from datetime import date, datetime, timezone
+from pathlib import Path
+from src.storage.artifacts import atomic_json
 import logging
 import time
 
@@ -45,11 +47,14 @@ def is_complete(connection, period):
         return bool(result.scalar_one())
 
 
-def _refresh_period(period):
+def _refresh_period(period, *, reprocess=False):
     """Carrega um mês até a Gold somente quando a Bronze está disponível."""
     year, month = map(int, period.split('-'))
-    if not run_backfill(year, month, month, 0):
-        return 'PENDING'
+    collected = run_backfill(
+        year, month, month, 0, force_download=reprocess, return_results=True,
+    )[period]
+    if collected not in ('EXISTS', 'UPLOADED', 'DOWNLOADED'):
+        return collected
 
     transform(period, 'minio', upload=True)
     load_staging(period, 'minio')
@@ -75,13 +80,19 @@ def refresh(periods, *, reprocess=False, delay=5.0):
                 if attempted and delay:
                     time.sleep(delay)
                 attempted = True
-                results[period] = _refresh_period(period)
+                results[period] = _refresh_period(period, reprocess=reprocess)
             except Exception:
                 logger.exception('Falha na atualização de %s', period)
                 results[period] = 'FAILED'
             finally:
                 logger.info('%s: %s', period, results.get(period, 'FAILED'))
     return results
+
+
+def save_report(path, started, results):
+    complete = bool(results) and all(s in ('SUCCESS', 'SKIPPED') for s in results.values())
+    atomic_json(path, {'started_at': started, 'finished_at': datetime.now(timezone.utc).isoformat(),
+                      'status': 'SUCCESS' if complete else 'INCOMPLETE', 'periods': results})
 
 
 def _argument_parser():
@@ -98,11 +109,12 @@ def _argument_parser():
         help='Segundos entre meses que precisam de processamento (0–3600).',
     )
     parser.add_argument(
-        '--reprocess', action='store_true', help='Recarrega também meses auditados.',
+        '--reprocess', action='store_true', help='Baixa novamente da fonte e recarrega também meses auditados.',
     )
     parser.add_argument(
         '--plan', action='store_true', help='Lista meses sem conectar aos serviços.',
     )
+    parser.add_argument('--report', type=Path, help='Grava resumo JSON local da execução, sem credenciais.')
     return parser
 
 
@@ -119,11 +131,16 @@ def main():
     if args.plan:
         return
     logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
+    started = datetime.now(timezone.utc).isoformat()
     try:
         results = refresh(periods, reprocess=args.reprocess, delay=args.delay)
     except Exception:
         logger.exception('Atualização interrompida.')
+        if args.report:
+            save_report(args.report, started, {p: 'FAILED' for p in periods})
         raise SystemExit(1)
+    if args.report:
+        save_report(args.report, started, results)
     if any(status not in ('SUCCESS', 'SKIPPED') for status in results.values()):
         raise SystemExit(1)
 

@@ -21,6 +21,7 @@ from src.ingestion.download_complaints import (
     get_complaint_datasets,
 )
 from src.storage.minio_client import get_minio_client
+from src.storage.artifacts import archive_existing, artifact_info, publish_versioned, write_manifest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -239,11 +240,7 @@ def upload_bronze(client, path, object_key):
 
     logger.info("Upload para MinIO: %s", path.name)
 
-    client.upload_file(
-        str(path),
-        BRONZE_BUCKET,
-        object_key,
-    )
+    publish_versioned(client, path, BRONZE_BUCKET, object_key)
 
     response = client.head_object(
         Bucket=BRONZE_BUCKET,
@@ -366,10 +363,11 @@ def normalize_datasets(datasets):
     return normalized
 
 
-def get_dataset_catalog():
+def get_dataset_catalog(*, allow_cache=True):
     """
     Consulta a fonte e, se falhar,
-    utiliza a última listagem válida.
+    utiliza a última listagem válida quando allow_cache=True.
+    Com allow_cache=False, retorna apenas publicações da consulta atual.
 
     Retorna:
         datasets, origin, source_available
@@ -403,7 +401,7 @@ def get_dataset_catalog():
             "[OK] Consulta realizada com sucesso."
         )
 
-        return merged, "API", True
+        return (merged if allow_cache else normalized), "API", True
 
     except Exception as error:
         logger.warning(
@@ -411,7 +409,7 @@ def get_dataset_catalog():
             error,
         )
 
-        if cached:
+        if cached and allow_cache:
             logger.warning(
                 "Utilizando metadados do cache."
             )
@@ -430,11 +428,11 @@ def get_dataset_catalog():
 # DOWNLOAD
 # ============================================================
 
-def download_zip(dataset, period):
+def download_zip(dataset, period, *, force=False):
     destination = local_zip_path(period)
     temporary = destination.with_suffix(".zip.part")
 
-    if validate_local_zip(destination, period):
+    if not force and validate_local_zip(destination, period):
         return destination
 
     code = dataset["codigo"]
@@ -479,7 +477,9 @@ def download_zip(dataset, period):
                     f"Tamanho divergente: {period}"
                 )
 
+        archive_existing(destination)
         temporary.replace(destination)
+        write_manifest(destination, {**artifact_info(destination), "publication_code": dataset["codigo"]})
 
         logger.info(
             "[OK] Download validado: %s",
@@ -565,6 +565,8 @@ def process_pending_period(
     datasets,
     origin,
     source_available,
+    *,
+    force_download=False,
 ):
     filename = f"finalizadas_{period}.zip"
     dataset = datasets.get(filename)
@@ -615,6 +617,7 @@ def process_pending_period(
         local_path = download_zip(
             dataset,
             period,
+            force=force_download,
         )
 
         object_key = get_object_key(period)
@@ -655,7 +658,11 @@ def run_backfill(
     start_month,
     end_month,
     delay,
+    *,
+    force_download=False,
+    return_results=False,
 ):
+    """Coleta Bronze; resultado detalhado opcional preserva a API booleana."""
     periods = get_periods(
         year,
         start_month,
@@ -663,112 +670,115 @@ def run_backfill(
     )
 
     engine = get_engine()
-    client = get_minio_client()
+    try:
+        client = get_minio_client()
 
-    register_periods(engine, periods)
+        register_periods(engine, periods)
 
-    logger.info("=" * 70)
-    logger.info(
-        "BACKFILL: %s até %s",
-        periods[0],
-        periods[-1],
-    )
-    logger.info("=" * 70)
-
-    # Primeiro tenta resolver tudo localmente.
-    pending, results = check_existing_files(
-        engine,
-        client,
-        periods,
-    )
-
-    if not pending:
+        logger.info("=" * 70)
         logger.info(
-            "Todos os períodos já estão na Bronze. "
-            "Consulta à API dispensada."
+            "BACKFILL: %s até %s",
+            periods[0],
+            periods[-1],
+        )
+        logger.info("=" * 70)
+
+        # Reprocessamento exige a fonte atual; coleta comum reutiliza a Bronze.
+        if force_download:
+            pending, results = periods, {}
+        else:
+            pending, results = check_existing_files(engine, client, periods)
+
+        if not pending:
+            logger.info(
+                "Todos os períodos já estão na Bronze. "
+                "Consulta à API dispensada."
+            )
+
+        else:
+            logger.info(
+                "%s períodos precisam de coleta.",
+                len(pending),
+            )
+
+            datasets, origin, source_available = (
+                get_dataset_catalog(allow_cache=not force_download)
+            )
+
+            download_attempts = 0
+
+            for period in pending:
+                filename = f"finalizadas_{period}.zip"
+
+                # Aplica o intervalo apenas antes
+                # de outra tentativa real de download.
+                if (
+                    filename in datasets
+                    and download_attempts > 0
+                    and delay > 0
+                ):
+                    time.sleep(delay)
+
+                if filename in datasets:
+                    download_attempts += 1
+
+                try:
+                    result = process_pending_period(
+                        engine,
+                        client,
+                        period,
+                        datasets,
+                        origin,
+                        source_available,
+                        force_download=force_download,
+                    )
+
+                except Exception as error:
+                    logger.exception(
+                        "Erro inesperado em %s",
+                        period,
+                    )
+
+                    mark_failure(
+                        engine,
+                        period,
+                        error,
+                    )
+
+                    result = "FAILED"
+
+                results[period] = result
+
+        logger.info("=" * 70)
+        logger.info("RESUMO DO BACKFILL")
+
+        for period in periods:
+            logger.info(
+                "%s: %s",
+                period,
+                results.get(period, "UNKNOWN"),
+            )
+
+        logger.info("=" * 70)
+
+        completed = sum(
+            result in (
+                "EXISTS",
+                "UPLOADED",
+                "DOWNLOADED",
+            )
+            for result in results.values()
         )
 
-    else:
         logger.info(
-            "%s períodos precisam de coleta.",
-            len(pending),
+            "Concluídos: %s/%s",
+            completed,
+            len(periods),
         )
 
-        datasets, origin, source_available = (
-            get_dataset_catalog()
-        )
-
-        download_attempts = 0
-
-        for period in pending:
-            filename = f"finalizadas_{period}.zip"
-
-            # Aplica o intervalo apenas antes
-            # de outra tentativa real de download.
-            if (
-                filename in datasets
-                and download_attempts > 0
-                and delay > 0
-            ):
-                time.sleep(delay)
-
-            if filename in datasets:
-                download_attempts += 1
-
-            try:
-                result = process_pending_period(
-                    engine,
-                    client,
-                    period,
-                    datasets,
-                    origin,
-                    source_available,
-                )
-
-            except Exception as error:
-                logger.exception(
-                    "Erro inesperado em %s",
-                    period,
-                )
-
-                mark_failure(
-                    engine,
-                    period,
-                    error,
-                )
-
-                result = "FAILED"
-
-            results[period] = result
-
-    logger.info("=" * 70)
-    logger.info("RESUMO DO BACKFILL")
-
-    for period in periods:
-        logger.info(
-            "%s: %s",
-            period,
-            results.get(period, "UNKNOWN"),
-        )
-
-    logger.info("=" * 70)
-
-    completed = sum(
-        result in (
-            "EXISTS",
-            "UPLOADED",
-            "DOWNLOADED",
-        )
-        for result in results.values()
-    )
-
-    logger.info(
-        "Concluídos: %s/%s",
-        completed,
-        len(periods),
-    )
-
-    return completed == len(periods)
+        return results if return_results else completed == len(periods)
+    finally:
+        engine.dispose()
 
 
 # ============================================================

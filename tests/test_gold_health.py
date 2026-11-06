@@ -139,3 +139,11 @@ def test_cli_success_returns_zero(monkeypatch, capsys):
     monkeypatch.setattr(gold_health, 'get_gold_health', Mock(return_value={'alertas': []}))
     gold_health.main()
     assert json.loads(capsys.readouterr().out) == {'alertas': []}
+
+
+def test_invalid_historical_domain_is_reported_without_rewriting(health_database):
+    health_database('UPDATE warehouse.fato_reclamacao SET tempo_resposta=-4 WHERE data_id=20260701')
+    report = gold_health.get_gold_health('2026-07', '2026-07')
+    assert report['periodos'][0]['registros_invalidos'] == 1
+    assert [a['codigo'] for a in report['alertas']] == ['DOMINIO_INVALIDO']
+    assert health_database('SELECT tempo_resposta FROM warehouse.fato_reclamacao WHERE data_id=20260701') == '-4'

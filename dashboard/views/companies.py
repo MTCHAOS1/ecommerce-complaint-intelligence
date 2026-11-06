@@ -1,6 +1,6 @@
 import streamlit as st
 
-from dashboard.components.filters import render_filters
+from dashboard.components.filters import render_filters, mostrar_cobertura, resumo_recorte
 from dashboard.components.formatting import inteiro, media
 from dashboard.components.monthly import figura_comparacao
 from dashboard.components.presentation import tabela_problemas
@@ -21,6 +21,7 @@ def render():
             st.warning('Nenhum período foi carregado na Gold.')
             return
         ano, meses = render_filters(periodos, 'companies', 'empresas')
+        mostrar_cobertura(periodos, ano)
         if not meses:
             st.info('Selecione pelo menos um mês.')
             return
@@ -41,7 +42,7 @@ def render():
     except Exception:
         st.error('Não foi possível carregar as empresas. Verifique a conexão com o banco e tente novamente.')
         return
-    st.caption(f'Recorte por data de finalização: {ano} — ' + ', '.join(MESES[m] for m in meses))
+    st.caption('Recorte por data de finalização: ' + resumo_recorte(ano, meses))
     indicadores = dados['indicadores'].iloc[0]
     with st.container(border=True):
         st.subheader('Evolução mensal')

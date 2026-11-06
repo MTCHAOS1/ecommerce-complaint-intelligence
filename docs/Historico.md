@@ -285,3 +285,47 @@ Esta entrega atualiza a apresentação das cinco páginas, substituindo os forma
 - Linhas continuam interrompidas nas lacunas; a alternativa de colunas preserva meses ausentes e zeros observados. Médias não são recalculadas a partir de médias agregadas.
 - Novas consultas em `dashboard/services/companies.py` e `dashboard/services/specialized.py`; somente leitura. Sem alterações no warehouse ou MinIO. Desempenho das novas consultas ainda não medido no volume principal.
 - Validação: **167 aprovados, 61 pulados e 5 subtestes** na suíte padrão; **228 aprovados, nenhum pulado e 5 subtestes** em PostgreSQL 18.6 descartável. Cobertura inclui denominador mensal global, normalização de nomes, filtros de classificação, seleção de ranking, máximo de três empresas, participação, lacunas, círculo/volume e três indicadores simultâneos. Figuras e interações verificadas por Streamlit AppTest; sem inspeção automatizada em navegador.
+
+
+## Correções da avaliação — 06/11/2026
+
+- `refresh --reprocess` consulta o catálogo atual e força download da Bronze, mesmo com cópias existentes. Catálogo em cache não substitui a fonte nesse modo; para reprocessar offline, usar `main.py`. Download temporário validado antes da substituição local.
+- Coleta detalhada distingue FAILED de PENDING no resumo da atualização; retorno booleano do backfill preservado para os chamadores existentes. Engine do backfill encerrada também em falhas.
+- Caminho local da ingestão resolvido pela raiz do projeto.
+- Manual operacional consolidado; versão anterior preservada em `Comandos-historico.md`.
+- Validação: 278 testes e 5 subtestes aprovados, nenhum pulado, com PostgreSQL descartável; dependências, compilação Python, sintaxe Bash e diff verificados. Novas regressões cobrem download forçado, falhas com preservação do ZIP anterior, catálogo atual sem fallback, continuidade mensal e resultados detalhados.
+- Provisionamento do leitor operacional permanece pendente: papel ausente, conta da aplicação sem CREATEROLE e sudo exigindo autenticação interativa. Instruções administrativas mantidas no manual. Não houve cargas no banco principal/MinIO nem alteração do cron ou .env.
+
+
+## Leitor operacional e desempenho de Geografia — 06/11/2026
+
+- Login complaints_dashboard criado pelo acesso administrativo ao usuário postgres do WSL. CONNECT no banco da aplicação, USAGE no warehouse e SELECT somente nas cinco tabelas analíticas. Sem superuser, CREATEDB, CREATEROLE, replicação, BYPASSRLS ou associação a outros papéis.
+- Senha aleatória configurada somente no .env local com permissão 0600. Login e leituras validados; UPDATE com WHERE FALSE recusado por falta de privilégio (42501), mesmo com transação de escrita. Sem acesso a Staging/Metadata. Não havia Streamlit ativo; a próxima inicialização usa o novo login.
+- Seis serviços especializados medidos no volume principal com cache Streamlit limpo, aquecimento e três repetições, em recorte de nove meses e julho. Comparação alternada dos indicadores de Geografia: 9073,73 → 859,63 ms e 1508,50 → 313,18 ms, respectivamente, com todos os indicadores iguais. Agrupamento antecipado por cidade/UF adotado, sem alterar dados ou índices. Método e limites em Desempenho.md.
+- Referência SQL preservada e regressão com localidades históricas normalizadas, filtros, meses combinados e vazio adicionada. Suíte completa: 279 testes e 5 subtestes aprovados, nenhum pulado, com PostgreSQL descartável.
+- Consulta atual conferida no banco principal com o leitor, retornando os indicadores de referência. Nenhuma carga, alteração no cron, commit ou push executado.
+
+
+## Sequência de qualidade, experiência analítica e recuperação — 06/11/2026
+
+1. Contrato v1 centralizado em src/quality/contract.py. Notas fracionárias e tempos negativos/infinitos recusados na qualidade e no SQL Gold. Dois tempos negativos históricos em junho (-16 e -4) detectados e preservados; diagnóstico DOMINIO_INVALIDO e aviso no dashboard, sem adulterar médias ou dados antigos.
+2. Revisão visual: azul como destaque, contraste explícito do cabeçalho de Empresas, tabela sem corte horizontal de contagens, gráficos de Atendimento/rankings empilhados em painéis estreitos, meses abreviados e rótulos de linha apenas nas extremidades. Mapa ajusta enquadramento. Atalhos Todos/3 meses/Limpar e cobertura distinguindo meses encerrados de correntes/futuros. Última carga visível em horário de Brasília.
+3. Migração 001 aditiva, com backup prévio e aplicada sob Advisory Lock: JSONB de origem na ingestão/auditoria e view restrita dashboard_freshness. Oito tabelas físicas mantidas; 3.198.882 fatos preservados. Auditorias antigas não recebem origem inventada.
+4. Proveniência: hashes de Bronze/Silver, identificação da publicação quando conhecida, versão S3 exata, contrato e código; manifesto verificado pelos bytes atuais. Staging + origem na mesma transação, capturada pela auditoria Gold; SQL Gold também tem fingerprint. Versionamento habilitado nos dois buckets reais, sem remover objetos. Uploads exigem versionamento e conferem hash/tamanho/VersionId. Cópias locais anteriores preservadas em .versions. Utilitários de download/normalização também registram origem.
+5. Backup PostgreSQL via snapshot consistente e cópia de todas as versões S3. Ensaio real em cluster PostgreSQL sem TCP e bucket descartáveis: oito tabelas e 17 versões recuperadas com hashes/contagens iguais. Backup válido data/backups/20261106-before-lineage-2, verification.json SUCCESS. Primeiro backup parcial preservado como tentativa incompleta. Usuários/ACLs e .env não são incluídos. Cópia externa e retenção ainda pendentes.
+6. Versionamento S3 testado também no serviço real com dois conteúdos em bucket descartável: versão anterior recuperada pelo VersionId e manifesto/hash conferidos; bucket de teste removido.
+7. Atualização recorrente real pelo wrapper existente: agosto/setembro SKIPPED, outubro PENDING/SOURCE_UNAVAILABLE após três HTTP 504. Saída 1 e logs/refresh_status.json INCOMPLETE. Novo refresh_health detecta execução ausente, incompleta, antiga ou horário futuro. Cron de seis horas mantido; nenhum envio externo de alertas. Outubro não foi carregado e a Gold foi preservada.
+8. Interface inspecionada no navegador: empilhamento, tabela legível, cabeçalho, cobertura e mapa. Testes de domínio, migração por inicialização, origem Bronze→Gold, arquivos adulterados e restauração real adicionados. Verificação final e contagem da suíte registradas no manual/README.
+
+O desenvolvimento permaneceu no escopo de ingestão, qualidade, armazenamento e análise agregada de reclamações do Consumidor.gov.br; não foram adicionados dados de clientes/vendas, inferência de CNPJ, fontes pagas ou um novo serviço de publicação. Sem commit/push.
+
+
+## Identificação dos estados e usabilidade do mapa — 06/11/2026
+
+Nomes completos/siglas opcionais no mapa, com cores de texto ajustadas à intensidade
+do preenchimento. Nomes também no hover, seletor UF e tabela. Legenda horizontal,
+mapa mais compacto e zoom por controles, evitando mudança involuntária ao rolar a
+página. Renderização de nomes conferida em navegador, modo noturno preservado.
+Rótulos podem ser omitidos por colisão na visão geral; aparecem ao ampliar.
+
+Validação do mapa: 297 testes e 5 subtestes aprovados, nenhum pulado, com PostgreSQL descartável. Nenhuma carga de dados executada nesta revisão visual.

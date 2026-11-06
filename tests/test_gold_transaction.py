@@ -55,7 +55,8 @@ def test_rejects_missing_invalid_or_different_period(seeded, period):
 
 
 @pytest.mark.parametrize('change', [
-    "uf='XX'", 'nota_do_consumidor=6', 'nota_do_consumidor=NULL',
+    "uf='XX'", 'nota_do_consumidor=6', 'nota_do_consumidor=1.5',
+    'tempo_resposta=-1', "tempo_resposta='NaN'::numeric", 'nota_do_consumidor=NULL',
     "avaliacao_reclamacao='Não Avaliada'", "nome_fantasia=' '", 'data_finalizacao=NULL',
 ])
 def test_quality_rejection_preserves_warehouse(seeded, change):
@@ -221,6 +222,7 @@ def test_local_pipeline_reuses_lock_and_audits_gold(operation_database, monkeypa
     main.main()
     main.main()
     assert sql("SELECT COUNT(*) FROM metadata.gold_load_control WHERE status='SUCCESS'") == '2'
+    assert sql("SELECT BOOL_AND(length(lineage #>> '{bronze,sha256}')=64 AND length(lineage->>'gold_sql_sha256')=64) FROM metadata.gold_load_control WHERE status='SUCCESS'") == 't'
     assert sql("SELECT COUNT(*) FROM warehouse.fato_reclamacao WHERE data_id=20260701") == '1'
     assert sql('SELECT row_to_json(f)::text FROM warehouse.fato_reclamacao f WHERE data_id=20260601') == june
     with gold_execution_lock():
@@ -258,11 +260,21 @@ def test_minio_pipeline_reuses_lock_for_cache_and_upload(operation_database, mon
     silver_key = 'consumidor_gov/ano=2026/mes=07/complaints_2026-07.parquet'
     objects = {('ecommerce-bronze', bronze_key): buffer.getvalue()}
     class Minio:
+        def get_bucket_versioning(self, **kwargs):
+            return {'Status': 'Enabled'}
+        def put_object(self, Bucket, Key, Body, **kwargs):
+            objects[(Bucket, Key)] = Body
+        def get_object(self, Bucket, Key, **kwargs):
+            from botocore.exceptions import ClientError
+            if (Bucket, Key) not in objects:
+                raise ClientError({'Error': {'Code': 'NoSuchKey'}}, 'GetObject')
+            return {'Body': BytesIO(objects[(Bucket, Key)])}
         def head_object(self, Bucket, Key):
-            return {'ContentLength': len(objects[(Bucket, Key)])}
-        def download_file(self, bucket, key, destination):
+            return {'ContentLength': len(objects[(Bucket, Key)]), 'VersionId': 'test-version',
+                    'Metadata': {'sha256': __import__('hashlib').sha256(objects[(Bucket, Key)]).hexdigest()}}
+        def download_file(self, bucket, key, destination, **kwargs):
             Path(destination).write_bytes(objects[(bucket, key)])
-        def upload_file(self, source, bucket, key):
+        def upload_file(self, source, bucket, key, **kwargs):
             objects[(bucket, key)] = Path(source).read_bytes()
     client = Minio()
     monkeypatch.setattr(storage, 'get_minio_client', lambda: client)

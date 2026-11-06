@@ -2,6 +2,8 @@ from src.database.gold_lock import exclusive_operation
 
 
 import argparse
+import json
+from src.storage.artifacts import archive_existing, sha256, write_manifest
 from pathlib import Path
 
 from botocore.exceptions import ClientError
@@ -83,11 +85,8 @@ def download_from_minio(layer, period):
 
         # Nesta primeira versão, sempre atualizamos
         # o cache a partir do objeto remoto.
-        client.download_file(
-            bucket,
-            object_key,
-            str(temporary),
-        )
+        options = {'ExtraArgs': {'VersionId': metadata['VersionId']}} if metadata.get('VersionId') else {}
+        client.download_file(bucket, object_key, str(temporary), **options)
 
         actual_size = temporary.stat().st_size
 
@@ -98,7 +97,26 @@ def download_from_minio(layer, period):
                 f"Obtido: {actual_size}."
             )
 
+        digest = sha256(temporary)
+        if metadata.get('Metadata', {}).get('sha256', digest) != digest:
+            raise RuntimeError('Checksum divergente após download do MinIO.')
+        lineage = {}
+        try:
+            response = client.get_object(Bucket=bucket, Key=object_key + '.lineage.json')
+            try:
+                lineage = json.loads(response['Body'].read())
+            finally:
+                response['Body'].close()
+        except ClientError as error:
+            if error.response.get('Error', {}).get('Code') not in ('404', 'NoSuchKey', 'NotFound'):
+                raise
+        if lineage.get('sha256') != digest or lineage.get('version_id') != metadata.get('VersionId'):
+            lineage = {}
+        archive_existing(destination)
         temporary.replace(destination)
+        write_manifest(destination, {**lineage, 'sha256': digest, 'bytes': actual_size,
+                       'filename': filename, 'bucket': bucket, 'key': object_key,
+                       'version_id': metadata.get('VersionId')})
 
         print()
         print("[OK] Arquivo recuperado do MinIO.")

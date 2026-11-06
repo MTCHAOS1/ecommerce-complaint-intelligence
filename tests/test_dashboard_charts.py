@@ -19,23 +19,23 @@ def test_local_geometry_contains_all_27_ufs_including_df():
 def test_map_links_counts_to_correct_geometry_and_keeps_absence_separate():
     counts = pd.DataFrame({'uf': ['SP', 'DF'], 'reclamacoes': [1200, 300]})
     figure = mapa_ufs(counts)
-    background, values = figure.data
+    background, values = figure.data[:2]
     assert values.type == 'choroplethmap'
-    assert all(trace.type != 'scattermap' for trace in figure.data)
+    assert all(trace.mode == 'text' for trace in figure.data[2:])
     assert list(values.locations) == [CODIGOS_UF['SP'], CODIGOS_UF['DF']]
     assert list(values.z) == [1200, 300]
     assert values.showscale is True
     assert values.zmin == 0
     assert values.zmax == 1200
-    assert list(values.customdata[0]) == ['SP', '1.200', '80,00%']
-    assert list(values.customdata[1]) == ['DF', '300', '20,00%']
+    assert list(values.customdata[0]) == ['SP', '1.200', '80,00%', 'São Paulo']
+    assert list(values.customdata[1]) == ['DF', '300', '20,00%', 'Distrito Federal']
     assert len(background.locations) == 27
     assert 'Sem registros' in background.customdata[0][1]
     assert figure.layout.map.style == 'white-bg'  # Sem provedor externo de tiles.
-    assert figure.layout.map.fitbounds is False
+    assert figure.layout.map.fitbounds == 'locations'
     assert figure.layout.map.center.lat == -14.5
     assert figure.layout.map.center.lon == -53.2
-    assert figure.layout.map.zoom == 3.2
+    assert figure.layout.map.zoom == 2.5
     assert background.featureidkey == 'properties.codarea'
     assert values.featureidkey == 'properties.codarea'
     assert values.colorscale[0][1] != values.colorscale[-1][1]
@@ -50,7 +50,7 @@ def test_filtered_map_marks_other_ufs_as_outside_filter():
 
 def test_empty_map_does_not_fabricate_observed_zeros():
     figure = mapa_ufs(pd.DataFrame(columns=['uf', 'reclamacoes']))
-    assert len(figure.data) == 1
+    assert len(figure.data) == 2
     assert figure.data[0].showscale is False
 
 
@@ -80,3 +80,15 @@ def test_map_positions_are_derived_from_each_uf_geometry():
     assert -49 < lon < -47
     assert -17 < lat < -15
     assert all(-75 < lon < -32 and -35 < lat < 6 for lon, lat in centers.values())
+
+
+def test_map_full_names_and_optional_labels_preserve_data():
+    from dashboard.constants import ESTADOS
+    frame = pd.DataFrame({'uf': ['SP'], 'reclamacoes': [10]})
+    named = mapa_ufs(frame, rotulos='Nomes completos')
+    labels = [label for trace in named.data[2:] for label in trace.text]
+    assert set(labels) == set(ESTADOS.values())
+    hidden = mapa_ufs(frame, rotulos='Sem rótulos')
+    assert len(hidden.data) == 2
+    assert list(named.data[1].z) == list(hidden.data[1].z)
+    assert named.data[1].colorbar.orientation == 'h'

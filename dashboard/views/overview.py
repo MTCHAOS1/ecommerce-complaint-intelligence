@@ -3,7 +3,7 @@
 import streamlit as st
 
 from dashboard.components.charts import ranking
-from dashboard.components.filters import meses_carregados, render_filters
+from dashboard.components.filters import meses_carregados, render_filters, mostrar_cobertura, resumo_recorte
 from dashboard.components.formatting import inteiro, media
 from dashboard.components.monthly import evolucao
 from dashboard.constants import MESES
@@ -12,7 +12,7 @@ from dashboard.services.overview import carregar_visao_geral
 
 
 def render():
-    st.title('E-commerce Complaint Intelligence')
+    st.title('Inteligência de reclamações')
     st.caption('Reclamações públicas do Consumidor.gov.br de diferentes setores, considerando a data de finalização.')
     with st.sidebar:
         if st.button('Atualizar dados', key='overview_refresh'):
@@ -27,14 +27,12 @@ def render():
         return
 
     ano, meses = render_filters(periodos)
-    ausentes = [MESES[mes] for mes in MESES if mes not in meses_carregados(periodos, ano)]
-    if ausentes:
-        st.info(f'Meses sem dados carregados em {ano}: ' + ', '.join(ausentes) + '. Ausência de carga não representa zero reclamações.')
+    mostrar_cobertura(periodos, ano)
     if not meses:
         st.info('Selecione pelo menos um mês.')
         return
 
-    st.caption(f'Recorte: {ano} — ' + ', '.join(MESES[mes] for mes in meses) + '.')
+    st.caption('Recorte: ' + resumo_recorte(ano, meses))
     try:
         dados = carregar_visao_geral(ano, meses)
     except Exception:
@@ -61,13 +59,14 @@ def render():
         return
 
     st.divider()
-    col_esq, col_dir = st.columns(2)
-    with col_esq:
-        st.subheader('Nomes de empresas com mais reclamações — até 15')
-        st.plotly_chart(ranking(dados['empresas'], 'empresa', 'Nome fantasia'), width='stretch')
-    with col_dir:
-        st.subheader('Reclamações por UF')
-        st.plotly_chart(ranking(dados['estados'], 'uf', 'UF'), width='stretch')
+    with st.container(key='overview_rankings'):
+        col_esq, col_dir = st.columns(2)
+        with col_esq:
+            st.subheader('Nomes de empresas com mais reclamações — até 15')
+            st.plotly_chart(ranking(dados['empresas'], 'empresa', 'Nome fantasia'), width='stretch')
+        with col_dir:
+            st.subheader('Reclamações por UF')
+            st.plotly_chart(ranking(dados['estados'], 'uf', 'UF'), width='stretch')
     st.subheader('Principais áreas de reclamação — até 15')
     st.plotly_chart(ranking(dados['areas'], 'area', 'Área'), width='stretch')
     st.caption('Os rankings mostram volumes de registros no recorte; não medem taxa de reclamação por cliente ou venda.')

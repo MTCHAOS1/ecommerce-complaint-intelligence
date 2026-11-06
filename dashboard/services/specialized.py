@@ -30,10 +30,14 @@ def carregar_geografia(ano, meses, uf=None):
     filtro = FILTRO + ' AND (CAST(:uf AS TEXT) IS NULL OR l.uf = :uf)'
     return consultar_lote({
         'indicadores': f"""
-            SELECT COUNT(*) AS reclamacoes,
-                   COUNT(DISTINCT l.uf) AS ufs,
-                   COUNT(DISTINCT (l.uf, BTRIM(l.cidade))) AS cidades
-            {LOCAL} WHERE {filtro}
+            WITH cidades AS (
+                SELECT l.uf, BTRIM(l.cidade) AS cidade, COUNT(*) AS reclamacoes
+                {LOCAL} WHERE {filtro}
+                GROUP BY l.uf, BTRIM(l.cidade)
+            )
+            SELECT COALESCE(SUM(reclamacoes), 0)::bigint AS reclamacoes,
+                   COUNT(DISTINCT uf) AS ufs, COUNT(*) AS cidades
+            FROM cidades
         """,
         'estados': distribuicao(LOCAL, filtro, 'l.uf', 'uf'),
         'cidades': distribuicao(

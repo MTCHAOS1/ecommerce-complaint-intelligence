@@ -41,7 +41,18 @@ def estilos_loading():
 
 
 def aplicar_identidade():
-    st.html(estilos_loading())
+    st.html(estilos_loading() + """<style>
+    [data-testid="stMain"] { container-type: inline-size; }
+    [data-testid="stMainBlockContainer"] { padding-top: 2rem; }
+    [data-testid="stMain"] h1 { font-size: clamp(1.5rem, 2.6vw, 2rem); line-height: 1.25; }
+    [data-testid="stMetricLabel"] p { white-space: normal; overflow: visible; }
+    @container (max-width: 850px) {
+      .st-key-overview_rankings [data-testid="stHorizontalBlock"],
+      .st-key-service_quality [data-testid="stHorizontalBlock"] { flex-direction: column; }
+      .st-key-overview_rankings [data-testid="stColumn"],
+      .st-key-service_quality [data-testid="stColumn"] { width: 100% !important; flex: 1 1 100%; }
+    }
+    </style>""")
 
 
 def ranking_completo_html(dados, categoria, titulo):
@@ -110,9 +121,9 @@ def tabela_problemas_html(dados):
     .eci-problems-scroll { max-height: 520px; overflow: auto; width: 100%;
         border: 1px solid rgba(100, 116, 139, .35); border-radius: .5rem; }
     .eci-problems-scroll:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
-    .eci-problems-table { width: 100%; min-width: 480px; border-collapse: separate;
+    .eci-problems-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: separate;
         border-spacing: 0; font-size: 1rem; line-height: 1.6; }
-    .eci-problems-table th { position: sticky; top: 0; background: var(--background-color, #ffffff);
+    .eci-problems-table th { position: sticky; top: 0; background: #1e293b; color: #f8fafc;
         z-index: 1; text-align: left; font-weight: 600; }
     .eci-problems-table th, .eci-problems-table td { padding: .85rem 1rem;
         border-bottom: 1px solid rgba(100, 116, 139, .25); vertical-align: top; }
@@ -122,7 +133,8 @@ def tabela_problemas_html(dados):
         border-radius: .25rem; background: rgba(100, 116, 139, .15); }
     .eci-problem-bar { height: 100%; border-radius: .25rem; background: #2563eb; }
     .eci-problems-table .eci-problem-count { text-align: right; white-space: nowrap;
-        font-variant-numeric: tabular-nums; font-weight: 600; width: 14rem; }
+        font-variant-numeric: tabular-nums; font-weight: 600; width: 8rem; }
+    .eci-problems-table th.eci-problem-count { white-space: normal; }
     </style><div class="eci-problems-scroll" role="region" tabindex="0"
         aria-label="Principais problemas, até 10, barras e tabela com rolagem">
     <table class="eci-problems-table"><thead><tr>
@@ -136,5 +148,5 @@ def tabela_problemas(dados):
     if dados.empty:
         st.info('Não há problemas para o recorte selecionado.')
         return
-    st.caption('Quantidade de reclamações de cada classificação de problema para a empresa e o período selecionados. Exibe as 10 classificações com mais registros; a contagem fica à direita e as barras comparam essas quantidades. O total exibido pode ser menor que o total da empresa por causa do limite de 10 classificações. Role o painel para ver todos os itens.')
+    st.caption('Até 10 problemas com mais reclamações no recorte. Valores à direita; barras na mesma escala. Role o painel para ver todos os itens.')
     st.html(tabela_problemas_html(dados))

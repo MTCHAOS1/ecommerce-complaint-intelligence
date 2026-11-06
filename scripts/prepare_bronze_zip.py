@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.database.gold_lock import exclusive_operation
+from src.storage.artifacts import artifact_info, write_manifest
 
 
 def sha256(path):
@@ -67,6 +68,9 @@ def prepare(period, source):
                 if archive.testzip() is not None:
                     raise ValueError("ZIP normalizado corrompido.")
             output_zip.replace(destination)
+        write_manifest(destination, {**artifact_info(destination), 'period': period,
+                       'original_archive_sha256': sha256(source), 'csv_sha256': sha256(csv_file),
+                       'normalizer_sha256': sha256(Path(__file__))})
         print(f"Origem preservada: {source}")
         print(f"SHA256 origem: {sha256(source)}")
         print(f"SHA256 CSV: {sha256(csv_file)}")

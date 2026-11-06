@@ -6,6 +6,7 @@ from pathlib import Path
 import boto3
 from botocore.client import Config
 from dotenv import load_dotenv
+from src.storage.artifacts import publish_versioned
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -58,11 +59,7 @@ def upload_file(local_path, bucket_name, object_name=None):
     print(f"Bucket: {bucket_name}")
     print(f"Objeto: {object_name}")
 
-    client.upload_file(
-        str(local_path),
-        bucket_name,
-        object_name,
-    )
+    publish_versioned(client, local_path, bucket_name, object_name)
 
     print("[OK] Upload concluído.")
 

@@ -41,9 +41,13 @@ def consultar(sql: str, parametros=None) -> pd.DataFrame:
 def periodos_disponiveis() -> pd.DataFrame:
     """Períodos com fatos carregados; ausência não significa zero reclamações."""
     return consultar("""
-        SELECT t.ano, t.mes, COUNT(*) AS total
+        SELECT t.ano, t.mes, COUNT(*) AS total, MAX(a.ultima_carga) AS ultima_carga,
+               COUNT(*) FILTER (WHERE f.nota_do_consumidor NOT IN (1,2,3,4,5)
+                    OR f.tempo_resposta < 0
+                    OR f.tempo_resposta IN ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric)) AS registros_invalidos
         FROM warehouse.fato_reclamacao f
         JOIN warehouse.dim_tempo t ON t.data_id = f.data_id
+        LEFT JOIN warehouse.dashboard_freshness a ON a.periodo = MAKE_DATE(t.ano, t.mes, 1)
         GROUP BY t.ano, t.mes
         ORDER BY t.ano, t.mes
     """)

@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from src.database.gold_lock import exclusive_operation
+from src.storage.artifacts import archive_existing, artifact_info, write_manifest
 BASE_URL = "https://consumidor.gov.br/pages/publicacao/externo/{codigo}/download"
 PREFIXO = "Arquivo em formato CSV com dados de todas as reclamações finalizadas"
 
@@ -93,7 +94,9 @@ def baixar_arquivo(item, destino):
                 if arquivo_com_erro is not None:
                     raise ValueError(f"ZIP corrompido: {arquivo_com_erro}")
             log(f"{nome} | Integridade ZIP validada", "OK")
+        archive_existing(caminho)
         temporario.replace(caminho)
+        write_manifest(caminho, {**artifact_info(caminho), "publication_code": item["codigo"]})
         log(f"Salvo: {caminho} | {caminho.stat().st_size} bytes | "
             f"Duração: {monotonic() - inicio:.1f}s", "OK")
     finally:

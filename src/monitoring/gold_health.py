@@ -17,7 +17,10 @@ COVERAGE_SQL = text("""
         FROM generate_series(CAST(:start AS date), CAST(:end AS date),
                              INTERVAL '1 month') AS month
     ), counts AS (
-        SELECT MAKE_DATE(t.ano, t.mes, 1) AS periodo, COUNT(*) AS registros_gold
+        SELECT MAKE_DATE(t.ano, t.mes, 1) AS periodo, COUNT(*) AS registros_gold,
+               COUNT(*) FILTER (WHERE nota_do_consumidor NOT IN (1,2,3,4,5)
+                    OR tempo_resposta < 0
+                    OR tempo_resposta IN ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric)) AS registros_invalidos
         FROM warehouse.fato_reclamacao f
         JOIN warehouse.dim_tempo t USING (data_id)
         WHERE t.data >= :start AND t.data < CAST(:end AS date) + INTERVAL '1 month'
@@ -29,6 +32,7 @@ COVERAGE_SQL = text("""
         GROUP BY periodo
     )
     SELECT m.periodo, COALESCE(c.registros_gold, 0) AS registros_gold,
+           COALESCE(c.registros_invalidos, 0) AS registros_invalidos,
            a.execution_id, a.status AS ultima_situacao,
            a.registros_staging AS registros_staging_auditados,
            a.registros_gold AS registros_gold_auditados,
@@ -89,6 +93,8 @@ def get_gold_health(start, end, timeout_minutes=60):
     alerts = []
     for row in periods:
         codes = []
+        if row['registros_invalidos']:
+            codes.append('DOMINIO_INVALIDO')
         if row['registros_gold'] == 0:
             codes.append('SEM_DADOS')
         if row['execution_id'] is None:

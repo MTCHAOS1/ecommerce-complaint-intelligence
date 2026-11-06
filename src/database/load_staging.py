@@ -1,5 +1,7 @@
 
 import argparse
+import json
+from src.storage.artifacts import artifact_info
 import re
 from pathlib import Path
 
@@ -32,27 +34,9 @@ TABLE = "complaints"
 
 CHUNK_SIZE = 5_000
 
-EXPECTED_COLUMNS = [
-    "regiao",
-    "uf",
-    "cidade",
-    "sexo",
-    "faixa_etaria",
-    "data_finalizacao",
-    "tempo_resposta",
-    "nome_fantasia",
-    "segmento_de_mercado",
-    "area",
-    "assunto",
-    "grupo_problema",
-    "problema",
-    "como_comprou_contratou",
-    "procurou_empresa",
-    "respondida",
-    "situacao",
-    "avaliacao_reclamacao",
-    "nota_do_consumidor",
-]
+from src.quality.contract import COLUMNS
+
+EXPECTED_COLUMNS = list(COLUMNS)
 
 
 # ============================================================
@@ -412,6 +396,14 @@ def run(period, source="local"):
                 connection,
                 period,
             )
+
+            connection.execute(text("""
+                INSERT INTO metadata.ingestion_control (period, staging_lineage)
+                VALUES (:period, CAST(:lineage AS JSONB))
+                ON CONFLICT (period) DO UPDATE SET staging_lineage=EXCLUDED.staging_lineage
+            """), {'period': period, 'lineage': json.dumps({**artifact_info(silver_file),
+                    'staging_relation_oid': connection.execute(text("SELECT 'staging.complaints'::regclass::oid")).scalar_one(),
+                    'staging_rows': len(df)})})
 
             # Ao sair normalmente do bloco,
             # SQLAlchemy executa COMMIT.

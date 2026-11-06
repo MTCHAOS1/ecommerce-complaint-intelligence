@@ -306,3 +306,30 @@ def test_problem_drilldown_filters_subject_and_group(dashboard_database):
     assert data['problemas'].iloc[0]['problemas'] == 'Cobrança indevida'
     assert carregar_problemas(2026, [7], assunto="' OR TRUE --", nivel='assuntos')['indicadores'].iloc[0]['reclamacoes'] == 0
     assert listar_assuntos(2026, [8], 'Financeiro').empty
+
+
+def test_geography_kpis_match_reference_with_repeated_normalized_cities(dashboard_database):
+    from pathlib import Path
+    from sqlalchemy import text
+    from dashboard.services.specialized import carregar_geografia
+    # Mesmo município/UF em dois IDs históricos, com espaços diferentes.
+    dashboard_database("""
+        INSERT INTO warehouse.dim_localidade (uf, cidade) VALUES ('SP', ' São Paulo ');
+        INSERT INTO warehouse.fato_reclamacao (empresa_id, localidade_id, data_id, classificacao_id)
+        SELECT f.empresa_id, l.localidade_id, f.data_id, f.classificacao_id
+        FROM warehouse.fato_reclamacao f CROSS JOIN warehouse.dim_localidade l
+        WHERE f.data_id=20260701 AND l.cidade=' São Paulo ';
+    """)
+    reference = (Path(__file__).resolve().parents[1] / 'sql/analytics/geography_kpis_reference.sql').read_text()
+    engine = create_engine(dashboard_database.connection_url)
+    try:
+        with engine.connect() as connection:
+            for months, uf in [([7], None), ([7, 8], None), ([7], 'SP'), ([7], 'AC'), ([9], None)]:
+                expected = dict(connection.execute(text(reference),
+                    {'ano': 2026, 'meses': months, 'uf': uf}).mappings().one())
+                current = carregar_geografia(2026, months, uf)['indicadores'].iloc[0].to_dict()
+                assert current == expected
+                if months == [7] and uf is None:
+                    assert current == {'reclamacoes': 5, 'ufs': 3, 'cidades': 3}
+    finally:
+        engine.dispose()

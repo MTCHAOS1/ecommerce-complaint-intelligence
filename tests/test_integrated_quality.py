@@ -20,6 +20,8 @@ def test_valid_quality():
 @pytest.mark.parametrize('column,value', [
     ('uf', 'XX'), ('cidade', ' '), ('nome_fantasia', None),
     ('respondida', 'S'), ('nota_do_consumidor', 6),
+    ('nota_do_consumidor', 1.5), ('tempo_resposta', -1),
+    ('tempo_resposta', float('inf')),
     ('nota_do_consumidor', None), ('avaliacao_reclamacao', 'Não Avaliada'),
     ('data_finalizacao', pd.Timestamp('2026-08-01')),
 ])

@@ -37,7 +37,10 @@ def figura_mensal(dados, meses, indicador='Reclamações', formato='Linha'):
     campo, base, tipo = INDICADORES[indicador]
     serie = preparar_serie(dados, meses, campo)
     valores = [None if pd.isna(v) else float(v) for v in serie[campo]]
-    textos = [formatar(v, tipo) if pd.notna(v) else '' for v in serie[campo]]
+    # Rótulos nas extremidades; todos os valores e variações continuam no hover.
+    observados = serie[campo].dropna()
+    rotulados = set(observados.index) if len(observados) <= 3 else {observados.index[0], observados.index[-1]}
+    textos = [formatar(v, tipo) if pd.notna(v) and m in rotulados else '' for m, v in serie[campo].items()]
     detalhes = []
     for mes, linha in serie.iterrows():
         valor = linha[campo]
@@ -66,7 +69,9 @@ def figura_mensal(dados, meses, indicador='Reclamações', formato='Linha'):
                          hovermode='x unified', showlegend=False,
                          xaxis={'type': 'category', 'categoryorder': 'array',
                                 'categoryarray': [MESES[mes] for mes in serie.index]})
-    figura.update_yaxes(rangemode='tozero', gridcolor='#e2e8f0')
+    figura.update_xaxes(tickmode='array', tickvals=[MESES[m] for m in serie.index],
+                        ticktext=[MESES[m][:3] for m in serie.index], tickangle=0)
+    figura.update_yaxes(rangemode='tozero')
     if tipo == 'nota':
         figura.update_yaxes(range=[0, 5.6])
     elif tipo == 'percentual':
@@ -112,19 +117,20 @@ def evolucao(dados, meses, namespace):
 def atendimento_mensal(dados, meses):
     evolucao(dados, meses, 'service')
     st.subheader('Qualidade do atendimento por mês')
-    for coluna, indicador in zip(st.columns(3), ['Tempo médio de resposta', 'Nota média', 'Respondidas (%)']):
-        with coluna:
-            st.markdown(f'**{indicador}**')
-            campo, _, _ = INDICADORES[indicador]
-            if dados[campo].notna().any():
-                figura = figura_mensal(dados, meses, indicador)
-                figura.update_layout(height=310, margin={'l': 5, 'r': 15, 't': 30, 'b': 40})
-                figura.update_traces(mode='lines+markers', text=None)
-                figura.update_xaxes(tickmode='array', tickvals=[MESES[m] for m in range(min(meses), max(meses) + 1)],
-                                    ticktext=[MESES[m][:3] for m in range(min(meses), max(meses) + 1)])
-                st.plotly_chart(figura, width='stretch', key=f'service_small_{campo}')
-            else:
-                st.info('Sem valores informados no recorte.')
+    with st.container(key='service_quality'):
+        for coluna, indicador in zip(st.columns(3), ['Tempo médio de resposta', 'Nota média', 'Respondidas (%)']):
+            with coluna:
+                st.markdown(f'**{indicador}**')
+                campo, _, _ = INDICADORES[indicador]
+                if dados[campo].notna().any():
+                    figura = figura_mensal(dados, meses, indicador)
+                    figura.update_layout(height=310, margin={'l': 5, 'r': 15, 't': 30, 'b': 40})
+                    figura.update_traces(mode='lines+markers', text=None)
+                    figura.update_xaxes(tickmode='array', tickvals=[MESES[m] for m in range(min(meses), max(meses) + 1)],
+                                        ticktext=[MESES[m][:3] for m in range(min(meses), max(meses) + 1)])
+                    st.plotly_chart(figura, width='stretch', key=f'service_small_{campo}')
+                else:
+                    st.info('Sem valores informados no recorte.')
     st.caption('Escalas independentes; bases no hover. Tempo na unidade da fonte, nota entre 1 e 5 e respostas entre 0% e 100%. Resposta não significa resolução.')
 
 
@@ -148,5 +154,7 @@ def figura_comparacao(dados, meses, empresas, participacao=False):
                          yaxis_title='Participação no total mensal (%)' if participacao else 'Reclamações',
                          hovermode='x unified', legend={'orientation': 'h', 'y': -0.25},
                          margin={'l': 20, 'r': 25, 't': 25, 'b': 90})
+    figura.update_xaxes(tickmode='array', tickvals=[MESES[m] for m in range(min(meses), max(meses)+1)],
+                        ticktext=[MESES[m][:3] for m in range(min(meses), max(meses)+1)], tickangle=0)
     figura.update_yaxes(rangemode='tozero', ticksuffix='%' if participacao else '')
     return figura

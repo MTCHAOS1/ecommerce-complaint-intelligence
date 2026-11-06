@@ -136,3 +136,18 @@ def test_refresh_button_clears_analytics_cache(dashboard, monkeypatch):
     app.button[0].click().run()
     assert not app.exception
     clear.assert_called_once()
+
+
+def test_month_shortcuts_and_future_coverage(dashboard):
+    from datetime import date
+    from dashboard.components.filters import cobertura
+    app, provider = dashboard
+    app.run()
+    app.button(key='overview_clear').click().run()
+    assert not app.metric
+    app.button(key='overview_all').click().run()
+    assert app.metric[0].value == '7'
+    periods = pd.DataFrame({'ano': [2026], 'mes': [9]})
+    missing, open_months = cobertura(periods, 2026, date(2026, 11, 6))
+    assert 10 in missing and 11 not in missing
+    assert open_months == [11, 12]

@@ -7,5 +7,6 @@ GRANT USAGE ON SCHEMA warehouse TO complaints_dashboard;
 GRANT SELECT ON warehouse.fato_reclamacao, warehouse.dim_empresa,
     warehouse.dim_localidade, warehouse.dim_tempo,
     warehouse.dim_classificacao TO complaints_dashboard;
+GRANT SELECT ON warehouse.dashboard_freshness TO complaints_dashboard;
 ALTER ROLE complaints_dashboard SET default_transaction_read_only = on;
 COMMIT;

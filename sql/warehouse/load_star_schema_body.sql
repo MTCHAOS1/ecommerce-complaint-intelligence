@@ -74,11 +74,13 @@ BEGIN
         WHERE uf NOT IN ('AC','AL','AP','AM','BA','CE','DF','ES','GO','MA',
                          'MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN',
                          'RS','RO','RR','SC','SP','SE','TO')
-           OR nota_do_consumidor NOT BETWEEN 1 AND 5
+           OR nota_do_consumidor NOT IN (1, 2, 3, 4, 5)
+           OR tempo_resposta < 0
+           OR tempo_resposta IN ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric)
            OR (avaliacao_reclamacao = 'Não Avaliada' AND nota_do_consumidor IS NOT NULL)
            OR (avaliacao_reclamacao IN ('Resolvida', 'Não Resolvida') AND nota_do_consumidor IS NULL)
     ) THEN
-        RAISE EXCEPTION 'Staging invalida: UF ou nota/avaliacao inconsistente.';
+        RAISE EXCEPTION 'Staging invalida: UF, tempo de resposta ou nota/avaliacao inconsistente.';
     END IF;
 END $$;
 

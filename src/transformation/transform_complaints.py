@@ -7,8 +7,10 @@ from pathlib import Path
 from src.database.gold_lock import exclusive_operation
 
 import pandas as pd
+from src.quality.contract import CONTRACT_VERSION, RAW_COLUMN_MAPPING
 
 from src.ingestion.zip_members import select_csv_member
+from src.storage.artifacts import archive_existing, artifact_info, sha256, publish_versioned, write_manifest
 
 from src.storage.download_from_minio import (
     download_from_minio,
@@ -144,27 +146,7 @@ def transform(df):
     Aplica as transformações da camada Silver.
     """
 
-    column_mapping = {
-        "Região": "regiao",
-        "UF": "uf",
-        "Cidade": "cidade",
-        "Sexo": "sexo",
-        "Faixa Etária": "faixa_etaria",
-        "Data Finalização": "data_finalizacao",
-        "Tempo Resposta": "tempo_resposta",
-        "Nome Fantasia": "nome_fantasia",
-        "Segmento de Mercado": "segmento_de_mercado",
-        "Área": "area",
-        "Assunto": "assunto",
-        "Grupo Problema": "grupo_problema",
-        "Problema": "problema",
-        "Como Comprou Contratou": "como_comprou_contratou",
-        "Procurou Empresa": "procurou_empresa",
-        "Respondida": "respondida",
-        "Situação": "situacao",
-        "Avaliação Reclamação": "avaliacao_reclamacao",
-        "Nota do Consumidor": "nota_do_consumidor",
-    }
+    column_mapping = RAW_COLUMN_MAPPING
 
     df = df.rename(
         columns=column_mapping
@@ -290,10 +272,13 @@ def save_silver(df, output_file):
         exist_ok=True,
     )
 
-    df.to_parquet(
-        output_file,
-        index=False,
-    )
+    temporary = output_file.with_name(output_file.name + ".part")
+    try:
+        df.to_parquet(temporary, index=False)
+        archive_existing(output_file)
+        temporary.replace(output_file)
+    finally:
+        temporary.unlink(missing_ok=True)
 
     print(
         f"[OK] Silver salva: {output_file}"
@@ -324,11 +309,7 @@ def upload_silver(output_file, period):
     print()
     print("Enviando Silver para o MinIO...")
 
-    client.upload_file(
-        str(output_file),
-        SILVER_BUCKET,
-        object_key,
-    )
+    publish_versioned(client, output_file, SILVER_BUCKET, object_key)
 
     metadata = client.head_object(
         Bucket=SILVER_BUCKET,
@@ -391,6 +372,14 @@ def run(period, source="local", upload=False):
         df,
         output_file,
     )
+
+    write_manifest(output_file, {
+        **artifact_info(output_file), 'period': period, 'bronze': artifact_info(zip_file),
+        'transformation_sha256': sha256(Path(__file__)),
+        'contract_version': CONTRACT_VERSION,
+        'contract_sha256': sha256(PROJECT_ROOT / 'src/quality/contract.py'),
+        'quality_sha256': sha256(PROJECT_ROOT / 'src/quality/validate_silver.py'),
+    })
 
     if upload:
         upload_silver(

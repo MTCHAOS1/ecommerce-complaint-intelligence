@@ -7,34 +7,9 @@ SILVER_FILE = Path(
     "data/processed/complaints_2026-08.parquet"
 )
 
-VALID_UFS = {
-    "AC", "AL", "AP", "AM", "BA", "CE", "DF",
-    "ES", "GO", "MA", "MT", "MS", "MG", "PA",
-    "PB", "PR", "PE", "PI", "RJ", "RN", "RS",
-    "RO", "RR", "SC", "SP", "SE", "TO"
-}
+from src.quality.contract import COLUMNS, SCORE_VALUES, VALID_UFS
 
-EXPECTED_COLUMNS = {
-    "regiao",
-    "uf",
-    "cidade",
-    "sexo",
-    "faixa_etaria",
-    "data_finalizacao",
-    "tempo_resposta",
-    "nome_fantasia",
-    "segmento_de_mercado",
-    "area",
-    "assunto",
-    "grupo_problema",
-    "problema",
-    "como_comprou_contratou",
-    "procurou_empresa",
-    "respondida",
-    "situacao",
-    "avaliacao_reclamacao",
-    "nota_do_consumidor",
-}
+EXPECTED_COLUMNS = set(COLUMNS)
 
 
 def load_silver():
@@ -142,15 +117,23 @@ def validate_consumer_score(df):
     ].dropna()
 
     invalid_scores = scores[
-        ~scores.between(1, 5)
+        ~scores.isin(SCORE_VALUES)
     ]
 
     if not invalid_scores.empty:
         raise ValueError(
-            "Notas fora do intervalo 1-5 encontradas."
+            "Notas devem ser inteiras de 1 a 5."
         )
 
     print("[OK] Notas do consumidor entre 1 e 5.")
+
+
+def validate_response_time(df):
+    """Tempo informado deve ser numérico, finito e não negativo; zero é válido."""
+    source = df['tempo_resposta'].dropna()
+    values = pd.to_numeric(source, errors='coerce')
+    if (values.isna() | values.lt(0) | values.isin([float('inf'), float('-inf')])).any():
+        raise ValueError('Tempo de resposta deve ser finito e não negativo.')
 
 
 def validate_not_evaluated_score(df):
@@ -221,6 +204,7 @@ def validate_silver(df, period=None):
     validate_boolean_columns(df)
     validate_dates(df)
     validate_consumer_score(df)
+    validate_response_time(df)
     validate_not_evaluated_score(df)
     validate_evaluated_score(df)
 

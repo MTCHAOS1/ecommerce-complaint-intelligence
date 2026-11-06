@@ -11,7 +11,7 @@ O projeto implementa uma pipeline em camadas **Bronze → Silver → Staging →
 | Dados Gold | 3.198.882 reclamações, de janeiro a setembro/2026 (conferido em 04/11/2026) |
 | Dashboard | Visão Geral, Empresas, Geografia, Problemas e Atendimento |
 | Atualização | Pipeline recorrente Bronze → Gold, com janela móvel e retomada |
-| Testes locais | 264 aprovados e 5 subtestes, sem pulados, com PostgreSQL 18.6 (04/11/2026) |
+| Testes locais | 297 aprovados e 5 subtestes, sem pulados, com PostgreSQL descartável (06/11/2026) |
 | CI hospedado | Python/dashboard e PostgreSQL 15/18 aprovados no commit `42d6ca3` |
 
 O [CI confirmado](https://github.com/MTCHAOS1/ecommerce-complaint-intelligence/actions/runs/40542187276)
@@ -217,8 +217,8 @@ Tempos referentes a uma execução anterior à última integração do controle 
 
 ### Validação automatizada
 
-A suíte completa validada em 04/11/2026 passou com **264 testes e 5 subtestes**,
-sem testes pulados, usando PostgreSQL 18.6 descartável. A suíte padrão não
+A suíte completa validada em 06/11/2026 passou com **297 testes e 5 subtestes**,
+sem testes pulados, usando PostgreSQL descartável. A suíte padrão não
 executa as integrações PostgreSQL sem configuração explícita.
 
 ```bash
@@ -316,10 +316,13 @@ python -m src.ingestion.refresh --start 2026-08 --end 2026-10
 O segundo comando **grava nas camadas de dados**. Um mês é dispensado somente
 quando sua última auditoria é `SUCCESS`, com contagens positivas de Staging e
 Gold iguais à contagem atual dos fatos do período. Isso não detecta revisões de
-conteúdo da fonte com a mesma contagem: use `--reprocess` para recarregar meses
-explicitamente. `--lookback 12` amplia a janela para publicações atrasadas;
+conteúdo da fonte com a mesma contagem: use `--reprocess` para baixar novamente
+da fonte e recarregar meses explicitamente. Nesse modo, cópias Bronze existentes
+e o catálogo em cache não dispensam a consulta/download. Se a fonte estiver
+indisponível, o período fica `PENDING`, sem processar a Bronze antiga. O ZIP local
+anterior só é substituído depois da validação do novo download. `--lookback 12` amplia a janela para publicações atrasadas;
 intervalos explícitos podem atravessar anos, com limite de 120 meses encerrados.
-Meses indisponíveis ficam `PENDING` no resumo da atualização; falhas ficam
+Meses indisponíveis ficam `PENDING` no resumo da atualização; falhas de download/upload ou processamento ficam
 `FAILED`. Os demais meses continuam e a CLI retorna código 1 se algum ficou
 incompleto. Esses rótulos do resumo não substituem os estados das tabelas de
 ingestão/auditoria. O lock compartilhado cobre toda a execução. Consulte
@@ -416,9 +419,9 @@ O `.gitignore` mantém credenciais, downloads, dados processados, logs e arquivo
 
 ## 9. Próximas etapas
 
-- [ ] Validar a atualização recorrente no ambiente operacional e conferir os períodos publicados/carregados.
-- [ ] Aplicar o usuário somente leitura do dashboard e validar o login.
-- [ ] Medir as consultas das páginas especializadas no volume principal.
+- [x] Validar a atualização recorrente no ambiente operacional (06/11/2026: agosto/setembro dispensados; outubro pendente após HTTP 504).
+- [x] Aplicar o usuário somente leitura do dashboard e validar o login (06/11/2026).
+- [x] Medir as consultas das páginas especializadas no volume principal (06/11/2026; Geografia otimizada após comparação).
 - [x] Expandir a observabilidade com cobertura mensal, última carga e execuções prolongadas via CLI.
 - [x] Reprocessar agosto/2026 com auditoria real e conferir a preservação dos dados (execução 66 / SUCCESS).
 - [ ] Reavaliar índices e estatísticas conforme novas cargas e medições.
@@ -430,3 +433,29 @@ O progresso das etapas concluídas está registrado no [histórico](docs/Histori
 **Fonte:** [Consumidor.gov.br](https://www.consumidor.gov.br/).
 
 As análises e transformações deste repositório são independentes e não representam posicionamento oficial da plataforma ou dos órgãos responsáveis pelos dados.
+
+
+## Evolução de 06/11/2026 — qualidade, interface e recuperação
+
+Contrato centralizado, validação de notas inteiras e tempos finitos/não negativos,
+proveniência por SHA-256 e VersionId, versionamento Bronze/Silver e migração
+aditiva concluídos. O dashboard recebeu correções de contraste, gráficos
+responsivos, atalhos de período, cobertura e última carga bem-sucedida.
+
+**Qualidade histórica:** dois tempos negativos em junho/2026 (-16 e -4) foram
+preservados e são sinalizados por DOMINIO_INVALIDO e no dashboard. Indicadores
+históricos mantêm esses registros; novas cargas os rejeitam. Não há correção
+silenciosa nem auditoria retroativa de origem.
+
+**Recuperação comprovada:** backup local anterior à migração restaurado em
+PostgreSQL e bucket descartáveis, com oito tabelas e 17 versões de objetos
+conferidas por hash. A Gold manteve 3.198.882 fatos. Uma cópia externa do backup
+e a política de retenção permanecem pendentes.
+
+**Atualização operacional:** o wrapper grava resumo JSON; outubro continua
+PENDING após três respostas HTTP 504 da fonte. O diagnóstico de execução
+incompleta retorna erro, sem alterar os fatos anteriores ou enviar mensagens.
+
+Procedimentos atuais: [migração e proveniência](docs/Comandos.md#19-contrato-migração-e-proveniência--06112026),
+[backup e recuperação](docs/Comandos.md#20-backup-e-ensaio-de-recuperação) e
+[estado da atualização](docs/Comandos.md#21-estado-da-atualização-recorrente).

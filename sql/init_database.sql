@@ -26,5 +26,6 @@ END $$;
 \ir staging/update_ingestion_control.sql
 \ir warehouse/create_star_schema.sql
 \ir warehouse/create_gold_load_control.sql
+\ir migrations/001_lineage_and_freshness.sql
 
 COMMIT;

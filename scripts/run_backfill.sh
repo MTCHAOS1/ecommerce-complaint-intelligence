@@ -25,6 +25,8 @@ echo "============================================================"
 
 # Sem argumentos: três últimos meses encerrados, Bronze até Gold.
 # Argumentos explícitos são encaminhados à CLI (incluindo --plan).
-"$PYTHON" -m src.ingestion.refresh "$@"
+status=0
+"$PYTHON" -m src.ingestion.refresh --report "$LOG_DIR/refresh_status.json" "$@" || status=$?
 
-echo "Atualização finalizada: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "Atualização finalizada: $(date '+%Y-%m-%d %H:%M:%S') | status=$status"
+exit "$status"

@@ -81,3 +81,62 @@ Evidências locais desta execução, não versionadas:
 A suíte completa passou com **181 testes aprovados, nenhum pulado e 5 subtestes aprovados** em PostgreSQL descartável. A suíte padrão, com integrações desativadas, passou com **128 aprovados, 53 pulados e 5 subtestes aprovados**. Os novos testes incluem planos reais em snapshot read-only, tratamento do aquecimento/buffers e igualdade da fórmula com grupos de tamanhos diferentes, notas/tempos ausentes e recorte sem carga. Não há limites de tempo nos testes, para evitar resultados dependentes da máquina de CI.
 
 Referências: [EXPLAIN — PostgreSQL 18](https://www.postgresql.org/docs/18/sql-explain.html) e [interpretação dos planos](https://www.postgresql.org/docs/18/using-explain.html).
+
+
+## Páginas especializadas e login de leitura — 06/11/2026
+
+Medição no banco principal, com 3.198.882 fatos de janeiro a setembro/2026,
+usando o login `complaints_dashboard`. Somente SELECTs; nenhum dado, índice,
+estatística ou parâmetro global do servidor foi alterado.
+
+### Medição dos serviços antes da otimização de Geografia
+
+Uma execução de aquecimento e três repetições por serviço/recorte, limpando o
+cache Streamlit por amostra. Caches PostgreSQL/SO mantidos. Valores abaixo
+medem a duração completa da chamada Python, incluindo conexão, SQL e transferência;
+não medem renderização ou latência do navegador. Cada lote tem seu próprio
+snapshot read-only. Limites por sessão: 60 s/instrução e 3 s/espera de lock.
+Empresas usa o nome com mais reclamações do recorte; comparação usa os três
+nomes com mais reclamações. Não representa todos os filtros possíveis.
+
+| Serviço | Nove meses | Julho |
+| --- | ---: | ---: |
+| Catálogo de empresas | 570.03 ms | 200.55 ms |
+| Detalhes de uma empresa | 545.53 ms | 410.56 ms |
+| Comparação de três empresas | 522.88 ms | 438.60 ms |
+| Geografia (antes da otimização) | 8573.71 ms | 1957.79 ms |
+| Problemas, ranking de assuntos | 3173.23 ms | 616.54 ms |
+| Atendimento | 1622.73 ms | 884.20 ms |
+
+### Otimização adotada em Geografia
+
+O custo principal estava no COUNT DISTINCT de cidade/UF sobre milhões de fatos.
+A consulta agora agrupa primeiro por UF e cidade com BTRIM, soma as contagens
+para o volume, conta os grupos para cidades e calcula UFs distintas nesses grupos.
+As chaves de localidade são obrigatórias no warehouse. IDs históricos distintos
+com a mesma cidade normalizada continuam contando como uma cidade por UF.
+
+Conferência dos indicadores em recorte amplo, julho, filtros SP/AC e mês sem dados;
+valores iguais à fórmula anterior. A referência está em
+`sql/analytics/geography_kpis_reference.sql`, e a consulta atual em
+`dashboard/services/specialized.py`, função `carregar_geografia`.
+
+Comparação alternada no mesmo snapshot REPEATABLE READ, READ ONLY, usando
+EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON, TIMING OFF, SUMMARY ON), um aquecimento
+e três amostras por variante. Estes tempos são somente execução PostgreSQL;
+não são diretamente comparáveis à tabela de chamadas Python acima.
+
+| Indicadores de Geografia | Referência | Consulta adotada | Redução |
+| --- | ---: | ---: | ---: |
+| Nove meses | 9073.73 ms | 859.63 ms | 90.53% |
+| Julho | 1508.50 ms | 313.18 ms | 79.24% |
+
+Tempos são locais e variam com concorrência e cache. O ganho se refere à consulta
+de indicadores, não à página completa. Testes não impõem limites de tempo.
+A regressão PostgreSQL compara a fórmula anterior com cidades repetidas entre IDs,
+espaços externos, filtro UF, mais de um mês e recorte vazio.
+
+Evidências locais não versionadas:
+
+- `data/diagnostics/specialized_reader_20261106T144930Z.json`: amostras dos seis serviços.
+- `data/diagnostics/geography_candidate_20261106T145101Z.json`: indicadores e planos completos da comparação alternada.

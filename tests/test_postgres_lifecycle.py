@@ -30,4 +30,4 @@ def test_partial_initialization_failure_removes_only_owned_database(postgres, mo
         with support.database_on_server(control.connection_url, control.psql):
             pytest.fail('Não deve executar testes após falha de preparação')
     assert control("SELECT datname FROM pg_database WHERE datname LIKE 'eci_%_test' ORDER BY datname") == before
-    assert control("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema IN ('staging','warehouse','metadata')") == '8'
+    assert control("SELECT COUNT(*) FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema IN ('staging','warehouse','metadata')") == '8'

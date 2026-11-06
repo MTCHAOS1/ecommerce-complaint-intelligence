@@ -10,6 +10,7 @@ import pandas as pd
 import requests
 
 from src.ingestion.zip_members import select_csv_member
+from src.storage.artifacts import archive_existing, artifact_info, write_manifest
 
 
 # ============================================================
@@ -23,7 +24,8 @@ PUBLICATIONS_URL = (
     "?indicadorTipoPublicacao=2"
 )
 
-RAW_DIR = Path("data/raw")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+RAW_DIR = PROJECT_ROOT / "data" / "raw"
 
 
 # ============================================================
@@ -351,44 +353,52 @@ def download_dataset(
         f"URL: {download_url}"
     )
 
-    with requests.get(
-        download_url,
-        stream=True,
-        timeout=120,
-    ) as response:
+    temporary = destination.with_name(destination.name + ".part")
+    try:
+        with requests.get(
+            download_url,
+            stream=True,
+            timeout=120,
+        ) as response:
 
-        response.raise_for_status()
+            response.raise_for_status()
 
-        with open(
-            destination,
-            "wb",
-        ) as file:
+            with open(
+                temporary,
+                "wb",
+            ) as file:
 
-            for chunk in response.iter_content(
-                chunk_size=1024 * 1024
-            ):
+                for chunk in response.iter_content(
+                    chunk_size=1024 * 1024
+                ):
 
-                if chunk:
-                    file.write(chunk)
+                    if chunk:
+                        file.write(chunk)
 
-    # --------------------------------------------------------
-    # VALIDAÇÃO PÓS-DOWNLOAD
-    # --------------------------------------------------------
+        # --------------------------------------------------------
+        # VALIDAÇÃO PÓS-DOWNLOAD
+        # --------------------------------------------------------
 
-    if not file_is_valid(
-        dataset,
-        destination,
-        period,
-    ):
+        if not file_is_valid(
+            dataset,
+            temporary,
+            period,
+        ):
 
-        destination.unlink(
-            missing_ok=True
-        )
+            temporary.unlink(
+                missing_ok=True
+            )
 
-        raise ValueError(
-            f"Falha na validação do arquivo: "
-            f"{file_name}"
-        )
+            raise ValueError(
+                f"Falha na validação do arquivo: "
+                f"{file_name}"
+            )
+
+        archive_existing(destination)
+        temporary.replace(destination)
+        write_manifest(destination, {**artifact_info(destination), 'publication_code': dataset['codigo']})
+    finally:
+        temporary.unlink(missing_ok=True)
 
     print(
         f"Download concluído: "

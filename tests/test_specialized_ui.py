@@ -103,7 +103,8 @@ def test_geography_offers_map_and_uf_bars_below_monthly_trend(specialized_app):
     figures = [json.loads(chart.proto.spec) for chart in app.get('plotly_chart')]
     assert figures[0]['data'][0]['type'] == 'scatter'
     figure = figures[2]
-    assert [trace['type'] for trace in figure['data']] == ['choroplethmap', 'choroplethmap']
+    assert [trace['type'] for trace in figure['data'][:2]] == ['choroplethmap', 'choroplethmap']
+    assert all(trace['type'] == 'scattermap' and trace['mode'] == 'text' for trace in figure['data'][2:])
     assert figure['data'][1]['customdata'][0][0] == 'SP'
     assert [tab.label for tab in app.tabs] == ['Barras', 'Mapa']
     assert figures[1]['data'][0]['orientation'] == 'h'
